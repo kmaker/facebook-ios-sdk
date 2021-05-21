@@ -25,6 +25,8 @@
 #else
  #import "FBSDKCoreKit+Internal.h"
 #endif
+
+#import "FBSDKCoreKitBasicsImportForShareKit.h"
 #import "FBSDKShareConstants.h"
 #import "FBSDKShareLinkContent.h"
 
@@ -146,7 +148,7 @@
   NSMutableDictionary<NSString *, id> *parameters = nil;
   if ([content isKindOfClass:[FBSDKShareLinkContent class]]) {
     FBSDKShareLinkContent *linkContent = (FBSDKShareLinkContent *)content;
-    parameters = [[NSMutableDictionary alloc] init];
+    parameters = [NSMutableDictionary new];
     [FBSDKTypeUtility dictionary:parameters setObject:linkContent.contentURL forKey:@"link"];
     [FBSDKTypeUtility dictionary:parameters setObject:linkContent.quote forKey:@"quote"];
     [FBSDKTypeUtility dictionary:parameters setObject:[self hashtagStringFromHashtag:linkContent.hashtag] forKey:@"hashtag"];
@@ -165,8 +167,9 @@
   if (hashtag.isValid) {
     return hashtag.stringRepresentation;
   } else {
+    NSString *msg = [NSString stringWithFormat:@"Invalid hashtag: '%@'", hashtag.stringRepresentation];
     [FBSDKLogger singleShotLogEntry:FBSDKLoggingBehaviorDeveloperErrors
-                       formatString:@"Invalid hashtag: '%@'", hashtag.stringRepresentation];
+                           logEntry:msg];
     return nil;
   }
 }
@@ -194,7 +197,7 @@
                                               bridgeOptions:(FBSDKShareBridgeOptions)bridgeOptions
                                       shouldFailOnDataError:(BOOL)shouldFailOnDataError
 {
-  NSMutableDictionary<NSString *, id> *parameters = [[NSMutableDictionary alloc] init];
+  NSMutableDictionary<NSString *, id> *parameters = [NSMutableDictionary new];
 
   // FBSDKSharingContent parameters
   NSString *const hashtagString = [self hashtagStringFromHashtag:shareContent.hashtag];
@@ -310,7 +313,7 @@
   if ([object isKindOfClass:[FBSDKSharePhoto class]]) {
     object = [self convertPhoto:(FBSDKSharePhoto *)object];
   } else if ([object isKindOfClass:[NSArray class]]) {
-    NSMutableArray *array = [[NSMutableArray alloc] init];
+    NSMutableArray *array = [NSMutableArray new];
     for (id item in (NSArray *)object) {
       [FBSDKTypeUtility array:array addObject:[self _convertObject:item]];
     }
@@ -324,7 +327,7 @@
   if (!photo) {
     return nil;
   }
-  NSMutableDictionary<NSString *, id> *dictionary = [[NSMutableDictionary alloc] init];
+  NSMutableDictionary<NSString *, id> *dictionary = [NSMutableDictionary new];
   [FBSDKTypeUtility dictionary:dictionary setObject:@(photo.userGenerated) forKey:@"user_generated"];
   [FBSDKTypeUtility dictionary:dictionary setObject:photo.caption forKey:@"caption"];
 

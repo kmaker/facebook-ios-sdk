@@ -19,19 +19,19 @@
 #import <OCMock/OCMock.h>
 #import <XCTest/XCTest.h>
 
-#import <OHHTTPStubs/NSURLRequest+HTTPBodyTesting.h>
-#import <OHHTTPStubs/OHHTTPStubs.h>
+@import TestTools;
 
 #import "FBSDKAccessToken.h"
 #import "FBSDKAppEvents.h"
+#import "FBSDKAppEvents+Internal.h"
+#import "FBSDKAppEventsConfigurationProviding.h"
 #import "FBSDKAppEventsState.h"
 #import "FBSDKAppEventsUtility.h"
 #import "FBSDKApplicationDelegate.h"
 #import "FBSDKConstants.h"
 #import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKGateKeeperManager.h"
-#import "FBSDKGraphRequest.h"
-#import "FBSDKGraphRequest+Internal.h"
+#import "FBSDKGraphRequestProtocol.h"
 #import "FBSDKInternalUtility.h"
 #import "FBSDKLogger.h"
 #import "FBSDKServerConfigurationFixtures.h"
@@ -44,15 +44,15 @@ static NSString *const _mockAppID = @"mockAppID";
 static NSString *const _mockUserID = @"mockUserID";
 
 // An extension that redeclares a private method so that it can be mocked
-@interface FBSDKApplicationDelegate ()
+@interface FBSDKApplicationDelegate (Testing)
 - (void)_logSDKInitialize;
 @end
 
-@interface FBSDKAppEvents ()
+@interface FBSDKAppEvents (Testing)
 @property (nonatomic, copy) NSString *pushNotificationsDeviceTokenString;
-- (void)checkPersistedEvents;
+@property (nonatomic, strong) id<FBSDKAtePublishing> atePublisher;
+
 - (void)publishInstall;
-- (void)publishATE;
 - (void)flushForReason:(FBSDKAppEventsFlushReason)flushReason;
 - (void)fetchServerConfiguration:(FBSDKCodeBlock)callback;
 - (void)instanceLogEvent:(FBSDKAppEventName)eventName
@@ -60,18 +60,25 @@ static NSString *const _mockUserID = @"mockUserID";
               parameters:(NSDictionary<NSString *, id> *)parameters
       isImplicitlyLogged:(BOOL)isImplicitlyLogged
              accessToken:(FBSDKAccessToken *)accessToken;
+- (void)applicationDidBecomeActive;
+- (void)applicationMovingFromActiveStateOrTerminating;
+- (void)setFlushBehavior:(FBSDKAppEventsFlushBehavior)flushBehavior;
 
 + (FBSDKAppEvents *)singleton;
+
++ (void)reset;
+
++ (void)setCanLogEvents;
+
++ (BOOL)canLogEvents;
+
++ (UIApplicationState)applicationState;
 
 + (void)logInternalEvent:(FBSDKAppEventName)eventName
       isImplicitlyLogged:(BOOL)isImplicitlyLogged;
 
 + (void)logInternalEvent:(FBSDKAppEventName)eventName
               valueToSum:(double)valueToSum
-      isImplicitlyLogged:(BOOL)isImplicitlyLogged;
-
-+ (void)logInternalEvent:(FBSDKAppEventName)eventName
-              parameters:(NSDictionary<NSString *, id> *)parameters
       isImplicitlyLogged:(BOOL)isImplicitlyLogged;
 
 + (void)logInternalEvent:(FBSDKAppEventName)eventName
@@ -103,16 +110,42 @@ static NSString *const _mockUserID = @"mockUserID";
   NSDictionary<NSString *, id> *_mockPayload;
   double _mockPurchaseAmount;
   NSString *_mockCurrency;
+  TestGraphRequestFactory *_graphRequestFactory;
+  UserDefaultsSpy *_store;
+  TestFeatureManager *_featureManager;
+  TestSettings *_settings;
+  TestOnDeviceMLModelManager *_onDeviceMLModelManager;
+  TestPaymentObserver *_paymentObserver;
+  TestTimeSpentRecorder *_timeSpentRecorder;
+  TestAppEventsStateStore *_appEventsStateStore;
+  TestMetadataIndexer *_metadataIndexer;
+  TestEventDeactivationParameterProcessor *_eventDeactivationParameterProcessor;
 }
 @end
 
 @implementation FBSDKAppEventsTests
+
++ (void)setUp
+{
+  [super setUp];
+
+  [FBSDKAppEvents reset];
+}
 
 - (void)setUp
 {
   self.shouldAppEventsMockBePartial = YES;
 
   [super setUp];
+  [self resetTestHelpers];
+  [FBSDKSettings reset];
+  _settings = [TestSettings new];
+  _settings.stubbedIsAutoLogAppEventsEnabled = YES;
+  [FBSDKInternalUtility reset];
+  _onDeviceMLModelManager = [TestOnDeviceMLModelManager new];
+  _paymentObserver = [TestPaymentObserver new];
+  _timeSpentRecorder = [TestTimeSpentRecorder new];
+  _metadataIndexer = [TestMetadataIndexer new];
 
   [self stubLoadingAdNetworkReporterConfiguration];
   [self stubServerConfigurationFetchingWithConfiguration:FBSDKServerConfigurationFixtures.defaultConfig error:nil];
@@ -121,6 +154,12 @@ static NSString *const _mockUserID = @"mockUserID";
   _mockPayload = @{@"fb_push_payload" : @{@"campaign" : @"testCampaign"}};
   _mockPurchaseAmount = 1.0;
   _mockCurrency = @"USD";
+  _graphRequestFactory = [TestGraphRequestFactory new];
+  _store = [UserDefaultsSpy new];
+  _featureManager = [TestFeatureManager new];
+  _paymentObserver = [TestPaymentObserver new];
+  _appEventsStateStore = [TestAppEventsStateStore new];
+  _eventDeactivationParameterProcessor = [TestEventDeactivationParameterProcessor new];
 
   [FBSDKAppEvents setLoggingOverrideAppID:_mockAppID];
 
@@ -129,13 +168,56 @@ static NSString *const _mockUserID = @"mockUserID";
 
   // This should be removed when these tests are updated to check the actual requests that are created
   [self stubAllocatingGraphRequestConnection];
+  [FBSDKAppEvents configureWithGateKeeperManager:TestGateKeeperManager.class
+                  appEventsConfigurationProvider:TestAppEventsConfigurationProvider.class
+                     serverConfigurationProvider:TestServerConfigurationProvider.class
+                            graphRequestProvider:_graphRequestFactory
+                                  featureChecker:_featureManager
+                                           store:_store
+                                          logger:TestLogger.class
+                                        settings:_settings
+                                 paymentObserver:_paymentObserver
+                               timeSpentRecorder:_timeSpentRecorder
+                             appEventsStateStore:_appEventsStateStore
+             eventDeactivationParameterProcessor:_eventDeactivationParameterProcessor];
+  [FBSDKAppEvents configureNonTVComponentsWithOnDeviceMLModelManager:_onDeviceMLModelManager
+                                                     metadataIndexer:_metadataIndexer];
 }
 
 - (void)tearDown
 {
   [super tearDown];
+  [FBSDKAppEvents reset];
+  [TestAppEventsConfigurationProvider reset];
+  [TestServerConfigurationProvider reset];
+  [TestGateKeeperManager reset];
+}
 
-  [OHHTTPStubs removeAllStubs];
+- (void)resetTestHelpers
+{
+  [TestSettings reset];
+  [TestLogger reset];
+}
+
+- (void)testInitializingCreatesAtePublisher
+{
+  // This is necessary for now because we stub the AppEvents Singleton. Should be able
+  // to move away from this pattern once all the dependencies are manageable but for now
+  // this is a workaround to be able to test that initializing uses the dependencies
+  // configured on the type to create objects.
+  FBSDKAppEvents *events = (FBSDKAppEvents *)[(NSObject *)[FBSDKAppEvents alloc] init];
+  FBSDKAppEventsAtePublisher *publisher = events.atePublisher;
+
+  XCTAssertEqualObjects(
+    publisher.store,
+    _store,
+    "Initializing should create an ate publisher with the expected data store"
+  );
+  XCTAssertEqualObjects(
+    publisher.appIdentifier,
+    _mockAppID,
+    "Initializing should create an ate publisher with the expected app id"
+  );
 }
 
 - (void)testAppEventsMockIsSingleton
@@ -247,6 +329,12 @@ static NSString *const _mockUserID = @"mockUserID";
                              mpn:nil
                            brand:nil
                       parameters:@{}];
+
+  XCTAssertEqual(
+    TestLogger.capturedLoggingBehavior,
+    FBSDKLoggingBehaviorDeveloperErrors,
+    "A log entry of LoggingBehaviorDeveloperErrors should be posted when some parameters are nil for logProductItem"
+  );
 }
 
 #pragma mark  Tests for set and clear user data
@@ -357,14 +445,104 @@ static NSString *const _mockUserID = @"mockUserID";
   OCMVerifyAll(self.appEventsMock);
 }
 
-- (void)testActivateApp
+- (void)testActivateAppWithInitializedSDK
 {
+  [FBSDKAppEvents setCanLogEvents];
+
   OCMExpect([self.appEventsMock publishInstall]);
   OCMExpect([self.appEventsMock fetchServerConfiguration:NULL]);
 
   [FBSDKAppEvents activateApp];
 
   OCMVerifyAll(self.appEventsMock);
+  XCTAssertTrue(
+    _timeSpentRecorder.restoreWasCalled,
+    "Activating App with initialized SDK should restore recording time spent data."
+  );
+  XCTAssertTrue(
+    _timeSpentRecorder.capturedCalledFromActivateApp,
+    "Activating App with initialized SDK should indicate its calling from activateApp when restoring recording time spent data."
+  );
+}
+
+- (void)testApplicationBecomingActiveRestoresTimeSpentRecording
+{
+  FBSDKAppEvents *events = (FBSDKAppEvents *)[(NSObject *)[FBSDKAppEvents alloc] init];
+  [events applicationDidBecomeActive];
+  XCTAssertTrue(
+    _timeSpentRecorder.restoreWasCalled,
+    "When application did become active, the time spent recording should be restored."
+  );
+  XCTAssertFalse(
+    _timeSpentRecorder.capturedCalledFromActivateApp,
+    "When application did become active, the time spent recording restoration should be indicated that it's not activating."
+  );
+}
+
+- (void)testApplicationTerminatingSuspendsTimeSpentRecording
+{
+  FBSDKAppEvents *events = (FBSDKAppEvents *)[(NSObject *)[FBSDKAppEvents alloc] init];
+  [events applicationMovingFromActiveStateOrTerminating];
+  XCTAssertTrue(
+    _timeSpentRecorder.suspendWasCalled,
+    "When application terminates or moves from active state, the time spent recording should be suspended."
+  );
+}
+
+- (void)testApplicationTerminatingPersistingStates
+{
+  FBSDKAppEvents *events = (FBSDKAppEvents *)[(NSObject *)[FBSDKAppEvents alloc] init];
+  [events setFlushBehavior:FBSDKAppEventsFlushBehaviorExplicitOnly];
+  [events instanceLogEvent:_mockEventName
+                valueToSum:@(_mockPurchaseAmount)
+                parameters:nil
+        isImplicitlyLogged:NO
+               accessToken:nil];
+  [events instanceLogEvent:_mockEventName
+                valueToSum:@(_mockPurchaseAmount)
+                parameters:nil
+        isImplicitlyLogged:NO
+               accessToken:nil];
+  [events applicationMovingFromActiveStateOrTerminating];
+
+  XCTAssertTrue(
+    _appEventsStateStore.capturedPersistedState.count > 0,
+    "When application terminates or moves from active state, the existing state should be persisted."
+  );
+}
+
+- (void)testActivateAppWithoutInitializedSDK
+{
+  [FBSDKAppEvents reset];
+  [FBSDKAppEvents activateApp];
+
+  OCMReject([self.appEventsMock publishInstall]);
+  OCMReject([self.appEventsMock fetchServerConfiguration:NULL]);
+
+  XCTAssertFalse(
+    _timeSpentRecorder.restoreWasCalled,
+    "Activating App without initialized SDK cannot restore recording time spent data."
+  );
+}
+
+- (void)testInstanceLogEventFilteringOutDeactivatedParameters
+{
+  NSDictionary<NSString *, id> *parameters = @{@"key" : @"value"};
+  [FBSDKAppEvents.singleton instanceLogEvent:_mockEventName
+                                  valueToSum:@(_mockPurchaseAmount)
+                                  parameters:parameters
+                          isImplicitlyLogged:NO
+                                 accessToken:nil];
+  XCTAssertEqualObjects(
+    _eventDeactivationParameterProcessor.capturedEventName,
+    _mockEventName,
+    "AppEvents instance should submit the event name to event deactivation parameters processor."
+  );
+  XCTAssertEqualObjects(
+    _eventDeactivationParameterProcessor.capturedParameters,
+    parameters,
+    "AppEvents instance should submit the parameters to event deactivation parameters processor."
+  );
 }
 
 #pragma mark  Test for log push notification
@@ -397,6 +575,12 @@ static NSString *const _mockUserID = @"mockUserID";
   NSDictionary<NSString *, id> *mockPayload = @{@"fb_push_payload" : @{@"campaign" : @""}};
   OCMReject([self.appEventsMock logEvent:eventName parameters:[OCMArg any]]);
   [FBSDKAppEvents logPushNotificationOpen:mockPayload];
+
+  XCTAssertEqual(
+    TestLogger.capturedLoggingBehavior,
+    FBSDKLoggingBehaviorDeveloperErrors,
+    "A log entry of LoggingBehaviorDeveloperErrors should be posted if logPushNotificationOpen is fed with empty campagin"
+  );
 }
 
 - (void)testSetFlushBehavior
@@ -410,22 +594,23 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testCheckPersistedEventsCalledWhenLogEvent
 {
-  OCMExpect([self.appEventsMock checkPersistedEvents]);
-
   OCMStub([self.appEventsMock flushBehavior]).andReturn(FBSDKAppEventsFlushReasonEagerlyFlushingEvent);
 
   [FBSDKAppEvents logEvent:FBSDKAppEventNamePurchased valueToSum:@(_mockPurchaseAmount) parameters:@{} accessToken:nil];
 
   OCMVerifyAll(self.appEventsMock);
+  XCTAssertTrue(
+    _appEventsStateStore.retrievePersistedAppEventStatesWasCalled,
+    "Should retrieve persisted states when logEvent was called and flush behavior was FlushReasonEagerlyFlushingEvent"
+  );
 }
 
 - (void)testRequestForCustomAudienceThirdPartyIDWithTrackingDisallowed
 {
-  [self stubUserDefaultsWith:[UserDefaultsSpy new]];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingDisallowed];
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingDisallowed;
 
   XCTAssertNil(
-    [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:SampleAccessToken.validToken],
+    [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:SampleAccessTokens.validToken],
     "Should not create a request for third party id if tracking is disallowed even if there is a current access token"
   );
   XCTAssertNil(
@@ -436,11 +621,11 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testRequestForCustomAudienceThirdPartyIDWithLimitedEventAndDataUsage
 {
-  [self stubSettingsShouldLimitEventAndDataUsageWith:YES];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
+  _settings.stubbedLimitEventAndDataUsage = YES;
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingAllowed;
 
   XCTAssertNil(
-    [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:SampleAccessToken.validToken],
+    [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:SampleAccessTokens.validToken],
     "Should not create a request for third party id if event and data usage is limited even if there is a current access token"
   );
   XCTAssertNil(
@@ -451,8 +636,8 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testRequestForCustomAudienceThirdPartyIDWithoutAccessTokenWithoutAdvertiserID
 {
-  [self stubSettingsShouldLimitEventAndDataUsageWith:NO];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
+  _settings.stubbedLimitEventAndDataUsage = NO;
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingAllowed;
   [self stubAppEventsUtilityAdvertiserIDWith:nil];
 
   XCTAssertNil(
@@ -464,13 +649,13 @@ static NSString *const _mockUserID = @"mockUserID";
 - (void)testRequestForCustomAudienceThirdPartyIDWithoutAccessTokenWithAdvertiserID
 {
   NSString *advertiserID = @"abc123";
-  [self stubSettingsShouldLimitEventAndDataUsageWith:NO];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
+  _settings.stubbedLimitEventAndDataUsage = NO;
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingAllowed;
   [self stubAppEventsUtilityAdvertiserIDWith:advertiserID];
 
-  FBSDKGraphRequest *request = [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:nil];
+  [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:nil];
   XCTAssertEqualObjects(
-    request.parameters,
+    _graphRequestFactory.capturedParameters,
     @{ @"udid" : advertiserID },
     "Should include the udid in the request when there is no access token available"
   );
@@ -478,20 +663,20 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testRequestForCustomAudienceThirdPartyIDWithAccessTokenWithoutAdvertiserID
 {
-  FBSDKAccessToken *token = SampleAccessToken.validToken;
-  [self stubSettingsShouldLimitEventAndDataUsageWith:NO];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
+  FBSDKAccessToken *token = SampleAccessTokens.validToken;
+  _settings.stubbedLimitEventAndDataUsage = NO;
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingAllowed;
   [self stubAppEventsUtilityAdvertiserIDWith:nil];
   [self stubAppEventsUtilityTokenStringToUseForTokenWith:token.tokenString];
 
-  FBSDKGraphRequest *request = [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:token];
+  [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:token];
   XCTAssertEqualObjects(
-    request.tokenString,
+    _graphRequestFactory.capturedTokenString,
     token.tokenString,
     "Should include the access token in the request when there is one available"
   );
   XCTAssertNil(
-    request.parameters[@"udid"],
+    _graphRequestFactory.capturedParameters[@"udid"],
     "Should not include the udid in the request when there is none available"
   );
 }
@@ -500,37 +685,36 @@ static NSString *const _mockUserID = @"mockUserID";
 {
   NSString *expectedGraphPath = [NSString stringWithFormat:@"%@/custom_audience_third_party_id", _mockAppID];
 
-  FBSDKAccessToken *token = SampleAccessToken.validToken;
+  FBSDKAccessToken *token = SampleAccessTokens.validToken;
   NSString *advertiserID = @"abc123";
-
-  [self stubSettingsShouldLimitEventAndDataUsageWith:NO];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
+  _settings.stubbedLimitEventAndDataUsage = NO;
+  _settings.advertisingTrackingStatus = FBSDKAdvertisingTrackingAllowed;
   [self stubAppEventsUtilityTokenStringToUseForTokenWith:token.tokenString];
   [self stubAppEventsUtilityAdvertiserIDWith:advertiserID];
 
-  FBSDKGraphRequest *request = [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:token];
+  [FBSDKAppEvents requestForCustomAudienceThirdPartyIDWithAccessToken:token];
 
   XCTAssertEqualObjects(
-    request.tokenString,
+    _graphRequestFactory.capturedTokenString,
     token.tokenString,
     "Should include the access token in the request when there is one available"
   );
   XCTAssertNil(
-    request.parameters[@"udid"],
+    _graphRequestFactory.capturedParameters[@"udid"],
     "Should not include the udid in the request when there is an access token available"
   );
   XCTAssertEqualObjects(
-    request.graphPath,
+    _graphRequestFactory.capturedGraphPath,
     expectedGraphPath,
     "Should use the expected graph path for the request"
   );
   XCTAssertEqual(
-    request.HTTPMethod,
+    _graphRequestFactory.capturedHttpMethod,
     FBSDKHTTPMethodGET,
     "Should use the expected http method for the request"
   );
   XCTAssertEqual(
-    request.flags,
+    _graphRequestFactory.capturedFlags,
     FBSDKGraphRequestFlagDoNotInvalidateTokenOnError | FBSDKGraphRequestFlagDisableErrorRecovery,
     "Should use the expected flags for the request"
   );
@@ -538,7 +722,6 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testPublishInstall
 {
-  [self stubUserDefaultsWith:[UserDefaultsSpy new]];
   [self stubAppID:self.appID];
   OCMExpect([self.appEventsMock fetchServerConfiguration:[OCMArg any]]);
 
@@ -547,79 +730,11 @@ static NSString *const _mockUserID = @"mockUserID";
   OCMVerifyAll(self.appEventsMock);
 }
 
-- (void)testPublishATEWithNoPing
-{
-  [self stubAppID:@"mockAppID"];
-  [self stubUserDefaultsWith:[UserDefaultsSpy new]];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
-
-  id graphRequestMock = OCMClassMock([FBSDKGraphRequest class]);
-  OCMStub([graphRequestMock alloc]).andReturn(graphRequestMock);
-  OCMStub(
-    [graphRequestMock initWithGraphPath:[OCMArg any]
-                             parameters:[OCMArg any]
-                            tokenString:nil
-                             HTTPMethod:FBSDKHTTPMethodPOST
-                                  flags:FBSDKGraphRequestFlagDoNotInvalidateTokenOnError | FBSDKGraphRequestFlagDisableErrorRecovery]
-  ).andReturn(graphRequestMock);
-
-  [self.appEventsMock publishATE];
-
-  OCMVerify([graphRequestMock startWithCompletionHandler:[OCMArg any]]);
-
-  [graphRequestMock stopMocking];
-  graphRequestMock = nil;
-}
-
-- (void)testPublishATEWithPingLessThan24Hours
-{
-  [self stubAppID:@"mockAppID"];
-  UserDefaultsSpy *userDefault = [UserDefaultsSpy new];
-  [userDefault setObject:[NSDate dateWithTimeIntervalSinceNow:-12 * 60 * 60] forKey:[NSString stringWithFormat:@"com.facebook.sdk:lastATEPing%@", @"mockAppID"]];
-  [self stubUserDefaultsWith:userDefault];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
-
-  id graphRequestMock = OCMClassMock([FBSDKGraphRequest class]);
-  OCMStub([graphRequestMock alloc]).andReturn(graphRequestMock);
-  OCMStub(
-    [graphRequestMock initWithGraphPath:[OCMArg any]
-                             parameters:[OCMArg any]
-                            tokenString:nil
-                             HTTPMethod:FBSDKHTTPMethodPOST
-                                  flags:FBSDKGraphRequestFlagDoNotInvalidateTokenOnError | FBSDKGraphRequestFlagDisableErrorRecovery]
-  ).andReturn(graphRequestMock);
-
-  [self.appEventsMock publishATE];
-
-  OCMReject([graphRequestMock startWithCompletionHandler:[OCMArg any]]);
-
-  [graphRequestMock stopMocking];
-  graphRequestMock = nil;
-}
-
-- (void)testPublishATEWithVerifyingParams
-{
-  [self stubAppID:@"mockAppID"];
-  [self stubUserDefaultsWith:[UserDefaultsSpy new]];
-  [self stubAdvertisingTrackingStatusWith:FBSDKAdvertisingTrackingAllowed];
-
-  [self.appEventsMock publishATE];
-
-  OCMReject(
-    [self.appEventsUtilityClassMock activityParametersDictionaryForEvent:[OCMArg any]
-                                               shouldAccessAdvertisingID:[OCMArg any]]
-  );
-}
-
 #pragma mark  Tests for Kill Switch
 
 - (void)testAppEventsKillSwitchDisabled
 {
-  id mockGateKeeperManager = OCMClassMock([FBSDKGateKeeperManager class]);
-  OCMStub(
-    [mockGateKeeperManager boolForKey:[OCMArg any]
-                         defaultValue:NO]
-  ).andReturn(NO);
+  [TestGateKeeperManager setGateKeeperValueWithKey:@"app_events_killswitch" value:NO];
 
   OCMExpect([self.appEventStatesMock addEvent:[OCMArg any] isImplicit:NO]);
 
@@ -630,18 +745,11 @@ static NSString *const _mockUserID = @"mockUserID";
                            accessToken:nil];
 
   [self.appEventStatesMock verify];
-
-  [mockGateKeeperManager stopMocking];
-  mockGateKeeperManager = nil;
 }
 
 - (void)testAppEventsKillSwitchEnabled
 {
-  id mockGateKeeperManager = OCMClassMock([FBSDKGateKeeperManager class]);
-  OCMStub(
-    [mockGateKeeperManager boolForKey:[OCMArg any]
-                         defaultValue:NO]
-  ).andReturn(YES);
+  [TestGateKeeperManager setGateKeeperValueWithKey:@"app_events_killswitch" value:YES];
 
   OCMReject([self.appEventStatesMock addEvent:[OCMArg any] isImplicit:NO]);
 
@@ -651,8 +759,7 @@ static NSString *const _mockUserID = @"mockUserID";
                     isImplicitlyLogged:NO
                            accessToken:nil];
 
-  [mockGateKeeperManager stopMocking];
-  mockGateKeeperManager = nil;
+  [TestGateKeeperManager setGateKeeperValueWithKey:@"app_events_killswitch" value:NO];
 }
 
 #pragma mark  Tests for log event
@@ -736,21 +843,20 @@ static NSString *const _mockUserID = @"mockUserID";
 
 - (void)testInstanceLogEventWhenAutoLogAppEventsDisabled
 {
-  [self stubIsAutoLogAppEventsEnabled:NO];
+  _settings.stubbedIsAutoLogAppEventsEnabled = NO;
   OCMReject(
     [self.appEventsMock instanceLogEvent:_mockEventName
                               valueToSum:@(_mockPurchaseAmount)
                               parameters:@{}
                       isImplicitlyLogged:NO
                              accessToken:nil]
-  ).andForwardToRealObject();
+  );
 
   [FBSDKAppEvents logInternalEvent:_mockEventName valueToSum:_mockPurchaseAmount isImplicitlyLogged:NO];
 }
 
 - (void)testInstanceLogEventWhenAutoLogAppEventsEnabled
 {
-  [self stubIsAutoLogAppEventsEnabled:YES];
   OCMExpect(
     [self.appEventsMock instanceLogEvent:_mockEventName
                               valueToSum:@(_mockPurchaseAmount)
@@ -777,6 +883,230 @@ static NSString *const _mockUserID = @"mockUserID";
   [FBSDKAppEvents logImplicitEvent:_mockEventName valueToSum:@(_mockPurchaseAmount) parameters:@{} accessToken:nil];
 
   OCMVerifyAll(self.appEventsMock);
+}
+
+#pragma mark Test for Server Configuration
+
+- (void)testFetchServerConfiguration
+{
+  FBSDKAppEventsConfiguration *configuration = [[FBSDKAppEventsConfiguration alloc] initWithJSON:@{}];
+  TestAppEventsConfigurationProvider.stubbedConfiguration = configuration;
+
+  __block BOOL didRunCallback = NO;
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:^void (void) {
+    didRunCallback = YES;
+  }];
+  XCTAssertNotNil(
+    TestAppEventsConfigurationProvider.capturedBlock,
+    "The expected block should be captured by the AppEventsConfiguration provider"
+  );
+  TestAppEventsConfigurationProvider.capturedBlock();
+  XCTAssertNotNil(
+    TestServerConfigurationProvider.capturedCompletionBlock,
+    "The expected block should be captured by the ServerConfiguration provider"
+  );
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    didRunCallback,
+    "fetchServerConfiguration should call the callback block"
+  );
+}
+
+- (void)testFetchingConfigurationIncludingCertainFeatures
+{
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureRestrictiveDataFiltering],
+    "fetchConfiguration should check if the RestrictiveDataFiltering feature is enabled"
+  );
+  // TODO: Once FBSDKRestrictiveDataFilterManager is injected, similar for all other features
+  //
+  // [TestFeatureManager capturedCompletionBlocks[FBSDKFeatureRestrictiveDataFiltering](YES)
+  //
+  // XCTAssertTrue(
+  // self.restrictiveDataFilterManager.isEnabled,
+  // "Should use the feature manager to determine if features are enabled"
+  // )
+
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureATELogging],
+    "fetchConfiguration should check if the ATELogging feature is enabled"
+  );
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureCodelessEvents],
+    "fetchConfiguration should check if CodelessEvents feature is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationIncludingEventDeactivation
+{
+  [FBSDKAppEvents.singleton fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureEventDeactivation],
+    "Fetching a configuration should check if the EventDeactivation feature is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationEnablingEventDeactivationParameterProcessorIfEventDeactivationEnabled
+{
+  [FBSDKAppEvents.singleton fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  [_featureManager completeCheckForFeature:FBSDKFeatureEventDeactivation with:YES];
+  XCTAssertTrue(
+    _eventDeactivationParameterProcessor.enableWasCalled,
+    "Fetching a configuration should enable event deactivation parameters processor if event deactivation feature is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationIncludingAAM
+{
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureAAM],
+    "Fetch a configuration should check if the AAM feature is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationEnablingMetadataIndexigIfAAMEnabled
+{
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  [_featureManager completeCheckForFeature:FBSDKFeatureAAM with:YES];
+  XCTAssertTrue(
+    _metadataIndexer.enableWasCalled,
+    "Fetching a configuration should enable metadata indexer if AAM feature is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationStartsPaymentObservingIfConfigurationAllowed
+{
+  _settings.stubbedIsAutoLogAppEventsEnabled = YES;
+  FBSDKServerConfiguration *serverConfiguration = [FBSDKServerConfigurationFixtures configWithDictionary:@{@"implicitPurchaseLoggingEnabled" : @YES}];
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(serverConfiguration, nil);
+  XCTAssertTrue(
+    _paymentObserver.didStartObservingTransactions,
+    "fetchConfiguration should start payment observing if the configuration allows it"
+  );
+  XCTAssertFalse(
+    _paymentObserver.didStopObservingTransactions,
+    "fetchConfiguration shouldn't stop payment observing if the configuration allows it"
+  );
+}
+
+- (void)testFetchingConfigurationStopsPaymentObservingIfConfigurationDisallowed
+{
+  _settings.stubbedIsAutoLogAppEventsEnabled = YES;
+  FBSDKServerConfiguration *serverConfiguration = [FBSDKServerConfigurationFixtures configWithDictionary:@{@"implicitPurchaseLoggingEnabled" : @NO}];
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(serverConfiguration, nil);
+  XCTAssertFalse(
+    _paymentObserver.didStartObservingTransactions,
+    "Fetching a configuration shouldn't start payment observing if the configuration disallows it"
+  );
+  XCTAssertTrue(
+    _paymentObserver.didStopObservingTransactions,
+    "Fetching a configuration should stop payment observing if the configuration disallows it"
+  );
+}
+
+- (void)testFetchingConfigurationStopPaymentObservingIfAutoLogAppEventsDisabled
+{
+  _settings.stubbedIsAutoLogAppEventsEnabled = NO;
+  FBSDKServerConfiguration *serverConfiguration = [FBSDKServerConfigurationFixtures configWithDictionary:@{@"implicitPurchaseLoggingEnabled" : @YES}];
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(serverConfiguration, nil);
+  XCTAssertFalse(
+    _paymentObserver.didStartObservingTransactions,
+    "Fetching a configuration shouldn't start payment observing if auto log app events is disabled"
+  );
+  XCTAssertTrue(
+    _paymentObserver.didStopObservingTransactions,
+    "Fetching a configuration should stop payment observing if auto log app events is disabled"
+  );
+}
+
+- (void)testFetchingConfigurationIncludingSKAdNetworkIfSKAdNetworkReportEnabled
+{
+  _settings.stubbedIsSKAdNetworkReportEnabled = YES;
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureSKAdNetwork],
+    "fetchConfiguration should check if the SKAdNetwork feature is enabled when SKAdNetworkReport is enabled"
+  );
+}
+
+- (void)testFetchingConfigurationNotIncludingSKAdNetworkIfSKAdNetworkReportDisabled
+{
+  _settings.stubbedIsSKAdNetworkReportEnabled = NO;
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertFalse(
+    [_featureManager capturedFeaturesContains:FBSDKFeatureSKAdNetwork],
+    "fetchConfiguration should NOT check if the SKAdNetwork feature is disabled when SKAdNetworkReport is disabled"
+  );
+}
+
+- (void)testFetchingConfigurationIncludingAEM
+{
+  if (@available(iOS 14.0, *)) {
+    FBSDKAEMReporter.isEnabled = NO;
+    [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+    TestAppEventsConfigurationProvider.capturedBlock();
+    TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+    XCTAssertTrue(
+      [_featureManager capturedFeaturesContains:FBSDKFeatureAEM],
+      "Fetching a configuration should check if the AEM feature is enabled"
+    );
+  }
+}
+
+- (void)testFetchingConfigurationIncludingPrivacyProtection
+{
+  [[FBSDKAppEvents singleton] fetchServerConfiguration:nil];
+  TestAppEventsConfigurationProvider.capturedBlock();
+  TestServerConfigurationProvider.capturedCompletionBlock(nil, nil);
+  XCTAssertTrue(
+    [_featureManager capturedFeaturesContains:FBSDKFeaturePrivacyProtection],
+    "Fetching a configuration should check if the PrivacyProtection feature is enabled"
+  );
+  [_featureManager completeCheckForFeature:FBSDKFeaturePrivacyProtection
+                                      with:YES];
+  XCTAssertTrue(
+    _onDeviceMLModelManager.isEnabled,
+    "Fetching a configuration should enable event processing if PrivacyProtection feature is enabled"
+  );
+}
+
+#pragma mark Test for Singleton Values
+
+- (void)testCanLogEventValues
+{
+  [FBSDKAppEvents reset];
+  XCTAssertFalse([FBSDKAppEvents canLogEvents], "The default value of canLogEvents should be NO");
+  [FBSDKAppEvents setCanLogEvents];
+  XCTAssertTrue([FBSDKAppEvents canLogEvents], "canLogEvents should now have a value of YES");
+}
+
+- (void)testApplicationStateValues
+{
+  XCTAssertEqual([FBSDKAppEvents applicationState], UIApplicationStateInactive, "The default value of applicationState should be UIApplicationStateInactive");
+  [FBSDKAppEvents setApplicationState:UIApplicationStateBackground];
+  XCTAssertEqual([FBSDKAppEvents applicationState], UIApplicationStateBackground, "The value of applicationState after calling setApplicationState should be UIApplicationStateBackground");
 }
 
 @end

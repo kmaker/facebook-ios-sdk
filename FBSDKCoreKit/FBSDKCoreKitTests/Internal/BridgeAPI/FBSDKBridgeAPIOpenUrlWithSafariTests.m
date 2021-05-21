@@ -32,6 +32,9 @@
                       fromViewController:(UIViewController *)fromViewController
                                  handler:(FBSDKSuccessBlock)handler
                            dylibResolver:(id<FBSDKDynamicFrameworkResolving>)dylibResolver;
+- (void)openURLWithAuthenticationSession:(NSURL *)url;
+- (void)setSessionCompletionHandlerFromHandler:(void (^)(BOOL, NSError *))handler;
+
 @end
 
 @interface FBSDKBridgeAPIOpenUrlWithSafariTests : FBSDKTestCase
@@ -50,7 +53,7 @@
   [super setUp];
 
   [FBSDKLoginManager resetTestEvidence];
-  _api = [FBSDKBridgeAPI new];
+  _api = [[FBSDKBridgeAPI alloc] initWithProcessInfo:[TestProcessInfo new]];
   _partialMock = OCMPartialMock(self.api);
   _urlOpener = [FBSDKLoginManager new];
 
@@ -122,7 +125,7 @@
 
 - (void)testWithoutSafariVcAvailable
 {
-  FakeDylibResolver *resolver = [FakeDylibResolver new];
+  TestDylibResolver *resolver = [TestDylibResolver new];
   self.urlOpener.stubbedIsAuthenticationUrl = NO;
   self.api.expectingBackground = YES;
 

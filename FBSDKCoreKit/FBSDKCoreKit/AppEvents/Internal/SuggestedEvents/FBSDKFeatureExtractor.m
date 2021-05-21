@@ -22,8 +22,10 @@
 
  #import "FBSDKFeatureExtractor.h"
 
- #import "FBSDKCoreKit+Internal.h"
+ #import "FBSDKCoreKitBasicsImport.h"
  #import "FBSDKModelManager.h"
+ #import "FBSDKViewHierarchy.h"
+ #import "FBSDKViewHierarchyMacros.h"
 
  #define REGEX_CR_PASSWORD_FIELD @"password"
  #define REGEX_CR_HAS_CONFIRM_PASSWORD_FIELD @"(?i)(confirm.*password)|(password.*(confirmation|confirm)|confirmation)"
@@ -222,9 +224,9 @@ void sum(float *val0, float *val1);
 {
   float *densefeat = (float *)calloc(30, sizeof(float));
 
-  NSString *validText = [FBSDKTypeUtility stringValue:node[VIEW_HIERARCHY_TEXT_KEY]];
-  NSString *validHint = [FBSDKTypeUtility stringValue:node[VIEW_HIERARCHY_HINT_KEY]];
-  NSString *validClassName = [FBSDKTypeUtility stringValue:node[VIEW_HIERARCHY_CLASS_NAME_KEY]];
+  NSString *validText = [FBSDKTypeUtility coercedToStringValue:node[VIEW_HIERARCHY_TEXT_KEY]];
+  NSString *validHint = [FBSDKTypeUtility coercedToStringValue:node[VIEW_HIERARCHY_HINT_KEY]];
+  NSString *validClassName = [FBSDKTypeUtility coercedToStringValue:node[VIEW_HIERARCHY_CLASS_NAME_KEY]];
 
   NSString *text = [validText lowercaseString] ?: @"";
   NSString *hint = [validHint lowercaseString] ?: @"";
@@ -343,7 +345,7 @@ void sum(float *val0, float *val1)
 
 + (float)regextMatch:(NSString *)pattern text:(NSString *)text
 {
-  NSString *validText = [FBSDKTypeUtility stringValue:text];
+  NSString *validText = [FBSDKTypeUtility coercedToStringValue:text];
   if (!validText) {
     return 0.0;
   }

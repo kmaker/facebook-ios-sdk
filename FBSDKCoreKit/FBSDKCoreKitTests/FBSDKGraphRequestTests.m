@@ -16,13 +16,16 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#import <OCMock/OCMock.h>
 #import <XCTest/XCTest.h>
 
+@import TestTools;
+
+#import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKGraphRequest.h"
 #import "FBSDKGraphRequest+Internal.h"
-#import "FBSDKGraphRequestConnection.h"
-#import "FBSDKGraphRequestConnection+Internal.h"
+#import "FBSDKGraphRequestConnection+GraphRequestConnecting.h"
+#import "FBSDKGraphRequestConnectionFactory.h"
+#import "FBSDKGraphRequestConnectionProviding.h"
 #import "FBSDKGraphRequestDataAttachment.h"
 #import "FBSDKGraphRequestMetadata.h"
 #import "FBSDKInternalUtility.h"
@@ -41,9 +44,23 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
   return @{};
 }
 
+@interface FBSDKGraphRequest (Testing)
+
+@property (nonatomic, strong) id<FBSDKGraphRequestConnectionProviding> connectionFactory;
+
++ (void)reset;
+
+@end
+
+@interface FBSDKAccessToken (Testing)
+
++ (void)resetCurrentAccessTokenCache;
+
+@end
+
 @interface FBSDKGraphRequestTests : XCTestCase
 {
-  FBSDKGraphRequestConnection *_mockConnection;
+  FBSDKGraphRequestConnection *_connection;
 }
 
 @end
@@ -52,18 +69,80 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
 
 - (void)setUp
 {
-  _mockConnection = [[FBSDKGraphRequestConnection alloc] init];
+  [super setUp];
+
+  _connection = [FBSDKGraphRequestConnection new];
+  [FBSDKAccessToken resetCurrentAccessTokenCache];
+  [FBSDKGraphRequest reset];
 }
 
 #pragma mark - Tests
+
+- (void)testCreatingGraphRequestWithDefaultSessionProxyFactory
+{
+  FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath];
+  NSObject *factory = (NSObject *)request.connectionFactory;
+  XCTAssertEqualObjects(
+    factory.class,
+    FBSDKGraphRequestConnectionFactory.class,
+    "A graph request should have the correct concrete session provider by default"
+  );
+}
+
+- (void)testCreatingWithCustomUrlSessionProxyFactory
+{
+  FBSDKGraphRequestConnection *connection = [FBSDKGraphRequestConnection new];
+  TestGraphRequestConnectionFactory *fakeConnectionFactory = [TestGraphRequestConnectionFactory createWithStubbedConnection:connection];
+  FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath
+                                                                 parameters:nil
+                                                                tokenString:nil
+                                                                 HTTPMethod:nil
+                                                                      flags:FBSDKGraphRequestFlagNone
+                                                          connectionFactory:fakeConnectionFactory];
+  NSObject *factory = (NSObject *)request.connectionFactory;
+
+  XCTAssertEqualObjects(
+    factory.class,
+    TestGraphRequestConnectionFactory.class,
+    "A graph request should persist the session factory it was created with"
+  );
+}
 
 - (void)testDefaultGETParameters
 {
   FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath];
 
-  [_mockConnection addRequest:request
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
+  [_connection addRequest:request
+        completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
   [self verifyRequest:request expectedGraphPath:_mockGraphPath expectedParameters:_mockParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodGET];
+}
+
+- (void)testStartRequestUsesRequestProvidedByFactory
+{
+  XCTestExpectation *expectation = [self expectationWithDescription:self.name];
+
+  TestGraphRequestConnection *fakeConnection = [TestGraphRequestConnection new];
+  TestGraphRequestConnectionFactory *fakeConnectionFactory = [TestGraphRequestConnectionFactory createWithStubbedConnection:fakeConnection];
+  FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath
+                                                                 parameters:nil
+                                                                tokenString:nil
+                                                                 HTTPMethod:nil
+                                                                      flags:FBSDKGraphRequestFlagNone
+                                                          connectionFactory:fakeConnectionFactory];
+
+  [request startWithCompletionHandler:^(FBSDKGraphRequestConnection *_Nullable potentialConnection, id _Nullable result, NSError *_Nullable error) {
+    XCTAssertEqualObjects(result, self.name);
+    [expectation fulfill];
+  }];
+
+  fakeConnection.capturedCompletion(nil, self.name, nil);
+  XCTAssertEqual(
+    fakeConnection.startCallCount,
+    1,
+    "The graph request should start the connection once"
+  );
+
+  [self waitForExpectations:@[expectation] timeout:1];
 }
 
 - (void)testGraphRequestGETWithEmptyParameters
@@ -73,17 +152,14 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
   FBSDKGraphRequest *request3 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockEmptyParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodGET];
   FBSDKGraphRequest *request4 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockEmptyParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodGET];
 
-  [_mockConnection addRequest:request1
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request2
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request3
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request4
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-
-  for (FBSDKGraphRequestMetadata *metadata in _mockConnection.requests) {
-    [self verifyRequest:metadata.request expectedGraphPath:_mockGraphPath expectedParameters:_mockEmptyParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodGET];
+  NSArray *requests = @[request1, request2, request3, request4];
+  for (FBSDKGraphRequest *request in requests) {
+    [self verifyRequest:request
+       expectedGraphPath:_mockGraphPath
+      expectedParameters:_mockEmptyParameters()
+     expectedTokenString:nil
+         expectedVersion:_mockDefaultVersion
+          expectedMethod:FBSDKHTTPMethodGET];
   }
 }
 
@@ -94,41 +170,41 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
   FBSDKGraphRequest *request3 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodGET];
   FBSDKGraphRequest *request4 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodGET];
 
-  [_mockConnection addRequest:request1
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request2
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request3
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request4
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-
-  for (FBSDKGraphRequestMetadata *metadata in _mockConnection.requests) {
-    [self verifyRequest:metadata.request expectedGraphPath:_mockGraphPath expectedParameters:_mockParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodGET];
+  NSArray *requests = @[request1, request2, request3, request4];
+  for (FBSDKGraphRequest *request in requests) {
+    [self verifyRequest:request
+       expectedGraphPath:_mockGraphPath
+      expectedParameters:_mockParameters()
+     expectedTokenString:nil
+         expectedVersion:_mockDefaultVersion
+          expectedMethod:FBSDKHTTPMethodGET];
   }
 }
 
 - (void)testDefaultPOSTParameters
 {
   FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath HTTPMethod:FBSDKHTTPMethodPOST];
-
-  [_mockConnection addRequest:request
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [self verifyRequest:request expectedGraphPath:_mockGraphPath expectedParameters:_mockEmptyParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodPOST];
+  [self verifyRequest:request
+     expectedGraphPath:_mockGraphPath
+    expectedParameters:_mockEmptyParameters()
+   expectedTokenString:nil
+       expectedVersion:_mockDefaultVersion
+        expectedMethod:FBSDKHTTPMethodPOST];
 }
 
 - (void)testGraphRequestPOSTWithEmptyParameters
 {
   FBSDKGraphRequest *request1 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockEmptyParameters() HTTPMethod:FBSDKHTTPMethodPOST];
   FBSDKGraphRequest *request2 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockEmptyParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodPOST];
+  NSArray *requests = @[request1, request2];
 
-  [_mockConnection addRequest:request1
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request2
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-
-  for (FBSDKGraphRequestMetadata *metadata in _mockConnection.requests) {
-    [self verifyRequest:metadata.request expectedGraphPath:_mockGraphPath expectedParameters:_mockEmptyParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodPOST];
+  for (FBSDKGraphRequest *request in requests) {
+    [self verifyRequest:request
+       expectedGraphPath:_mockGraphPath
+      expectedParameters:_mockEmptyParameters()
+     expectedTokenString:nil
+         expectedVersion:_mockDefaultVersion
+          expectedMethod:FBSDKHTTPMethodPOST];
   }
 }
 
@@ -136,14 +212,15 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
 {
   FBSDKGraphRequest *request1 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockParameters() HTTPMethod:FBSDKHTTPMethodPOST];
   FBSDKGraphRequest *request2 = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockParameters() tokenString:nil version:_mockDefaultVersion HTTPMethod:FBSDKHTTPMethodPOST];
+  NSArray *requests = @[request1, request2];
 
-  [_mockConnection addRequest:request1
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-  [_mockConnection addRequest:request2
-            completionHandler:^(FBSDKGraphRequestConnection *conn, id result, NSError *error) {}];
-
-  for (FBSDKGraphRequestMetadata *metadata in _mockConnection.requests) {
-    [self verifyRequest:metadata.request expectedGraphPath:_mockGraphPath expectedParameters:_mockParameters() expectedTokenString:nil expectedVersion:_mockDefaultVersion expectedMethod:FBSDKHTTPMethodPOST];
+  for (FBSDKGraphRequest *request in requests) {
+    [self verifyRequest:request
+       expectedGraphPath:_mockGraphPath
+      expectedParameters:_mockParameters()
+     expectedTokenString:nil
+         expectedVersion:_mockDefaultVersion
+          expectedMethod:FBSDKHTTPMethodPOST];
   }
 }
 
@@ -173,29 +250,44 @@ static NSDictionary<NSString *, NSString *> *const _mockEmptyParameters(void)
 
 - (void)testIsAttachments
 {
-  id mockUIImage = [OCMockObject niceMockForClass:[UIImage class]];
-  id mockData = [OCMockObject niceMockForClass:[NSData class]];
-  id mockDataAttachments = [OCMockObject niceMockForClass:[FBSDKGraphRequestDataAttachment class]];
+  id image = [UIImage new];
+  id data = [NSData new];
+  id dataAttachment = [[FBSDKGraphRequestDataAttachment alloc] initWithData:data
+                                                                   filename:@"fakefile"
+                                                                contentType:@"foo"];
+  XCTAssertTrue([FBSDKGraphRequest isAttachment:image]);
+  XCTAssertTrue([FBSDKGraphRequest isAttachment:data]);
+  XCTAssertTrue([FBSDKGraphRequest isAttachment:dataAttachment]);
 
-  XCTAssertTrue([FBSDKGraphRequest isAttachment:mockUIImage]);
-  XCTAssertTrue([FBSDKGraphRequest isAttachment:mockData]);
-  XCTAssertTrue([FBSDKGraphRequest isAttachment:mockDataAttachments]);
-
-  id mockString = [OCMockObject niceMockForClass:[NSString class]];
+  id string = [NSString new];
   XCTAssertTrue(
-    ![mockString isKindOfClass:[UIImage class]]
-    && ![mockString isKindOfClass:[NSData class]]
-    && ![mockString isKindOfClass:[FBSDKGraphRequestDataAttachment class]]
+    ![string isKindOfClass:UIImage.class]
+    && ![string isKindOfClass:NSData.class]
+    && ![string isKindOfClass:FBSDKGraphRequestDataAttachment.class]
   );
-  XCTAssertFalse([FBSDKGraphRequest isAttachment:mockString]);
+  XCTAssertFalse([FBSDKGraphRequest isAttachment:string]);
 
-  id mockDate = [OCMockObject niceMockForClass:[NSDate class]];
+  id date = [NSDate date];
   XCTAssertTrue(
-    ![mockDate isKindOfClass:[UIImage class]]
-    && ![mockDate isKindOfClass:[NSData class]]
-    && ![mockDate isKindOfClass:[FBSDKGraphRequestDataAttachment class]]
+    ![date isKindOfClass:[UIImage class]]
+    && ![date isKindOfClass:[NSData class]]
+    && ![date isKindOfClass:[FBSDKGraphRequestDataAttachment class]]
   );
-  XCTAssertFalse([FBSDKGraphRequest isAttachment:mockDate]);
+  XCTAssertFalse([FBSDKGraphRequest isAttachment:date]);
+}
+
+- (void)testCreateRequestWithDefaultTokenString
+{
+  TestAccessTokenWallet.currentAccessToken = SampleAccessTokens.validToken;
+  [FBSDKGraphRequest setCurrentAccessTokenStringProvider:[TestAccessTokenWallet class]];
+  FBSDKGraphRequest *request = [[FBSDKGraphRequest alloc] initWithGraphPath:_mockGraphPath parameters:_mockEmptyParameters()];
+  XCTAssertEqual(
+    request.tokenString,
+    TestAccessTokenWallet.tokenString,
+    "Should use the token string provider for the token string"
+  );
+  XCTAssertNotNil(request.tokenString, "Should have a concrete token string");
+  [FBSDKGraphRequest reset];
 }
 
 #pragma mark - helper function

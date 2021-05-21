@@ -25,8 +25,11 @@
   [super setUp];
 
   [FBSDKLoginManager resetTestEvidence];
-  _api = [FBSDKBridgeAPI new];
+
+  _api = [[FBSDKBridgeAPI alloc] initWithProcessInfo:[TestProcessInfo new]];
   _partialMock = OCMPartialMock(_api);
+
+  [self stubLoadingAppEventsConfiguration];
 }
 
 - (void)tearDown
@@ -318,8 +321,11 @@
 {
   XCTestExpectation *expectation = [self expectationWithDescription:self.name];
 
+  TestProcessInfo *processInfo = [[TestProcessInfo alloc]
+                                  initWithStubbedOperatingSystemCheckResult:NO];
+  self.api = [[FBSDKBridgeAPI alloc] initWithProcessInfo:processInfo];
+
   BOOL applicationOpensSuccessfully = YES;
-  [self stubIsOperatingSystemVersionAtLeast:iOS10Version with:NO];
   [self stubOpenURLWith:applicationOpensSuccessfully];
 
   [self.api openURL:self.sampleUrl sender:nil handler:^(BOOL _success, NSError *_Nullable error) {
@@ -340,8 +346,11 @@
   XCTestExpectation *expectation = [self expectationWithDescription:self.name];
 
   BOOL applicationOpensSuccessfully = NO;
-  [self stubIsOperatingSystemVersionAtLeast:iOS10Version with:NO];
   [self stubOpenURLWith:applicationOpensSuccessfully];
+
+  TestProcessInfo *processInfo = [[TestProcessInfo alloc]
+                                  initWithStubbedOperatingSystemCheckResult:NO];
+  self.api = [[FBSDKBridgeAPI alloc] initWithProcessInfo:processInfo];
 
   [self.api openURL:self.sampleUrl sender:nil handler:^(BOOL _success, NSError *_Nullable error) {
     XCTAssertEqual(
@@ -361,7 +370,6 @@
   XCTestExpectation *expectation = [self expectationWithDescription:self.name];
 
   BOOL applicationOpensSuccessfully = YES;
-  [self stubIsOperatingSystemVersionAtLeast:iOS10Version with:YES];
   [self stubOpenUrlOptionsCompletionHandlerWithPerformCompletion:YES
                                                completionSuccess:applicationOpensSuccessfully];
 
@@ -383,7 +391,6 @@
   XCTestExpectation *expectation = [self expectationWithDescription:self.name];
 
   BOOL applicationOpensSuccessfully = NO;
-  [self stubIsOperatingSystemVersionAtLeast:iOS10Version with:YES];
   [self stubOpenUrlOptionsCompletionHandlerWithPerformCompletion:YES
                                                completionSuccess:applicationOpensSuccessfully];
 
@@ -404,7 +411,7 @@
 
 - (void)testRequestCompletionBlockCalledWithSuccess
 {
-  FakeBridgeApiRequest *request = [FakeBridgeApiRequest requestWithURL:self.sampleUrl];
+  TestBridgeApiRequest *request = [TestBridgeApiRequest requestWithURL:self.sampleUrl];
   FBSDKBridgeAPIResponseBlock responseBlock = ^void (FBSDKBridgeAPIResponse *response) {
     XCTFail("Should not call the response block when the request completion is called with success");
   };
@@ -424,7 +431,7 @@
 
 - (void)testRequestCompletionBlockWithNonHttpRequestCalledWithoutSuccess
 {
-  FakeBridgeApiRequest *request = [FakeBridgeApiRequest requestWithURL:self.sampleUrl scheme:@"file"];
+  TestBridgeApiRequest *request = [TestBridgeApiRequest requestWithURL:self.sampleUrl scheme:@"file"];
   FBSDKBridgeAPIResponseBlock responseBlock = ^void (FBSDKBridgeAPIResponse *response) {
     XCTAssertEqualObjects(response.request, request, "The response should contain the original request");
     XCTAssertEqual(
@@ -454,7 +461,7 @@
 
 - (void)testRequestCompletionBlockWithHttpRequestCalledWithoutSuccess
 {
-  FakeBridgeApiRequest *request = [FakeBridgeApiRequest requestWithURL:self.sampleUrl scheme:@"https"];
+  TestBridgeApiRequest *request = [TestBridgeApiRequest requestWithURL:self.sampleUrl scheme:@"https"];
   FBSDKBridgeAPIResponseBlock responseBlock = ^void (FBSDKBridgeAPIResponse *response) {
     XCTAssertEqualObjects(response.request, request, "The response should contain the original request");
     XCTAssertEqual(
@@ -590,7 +597,7 @@
 {
   [self stubBridgeApiResponseWithUrlCreation];
   [self stubAppUrlSchemeWith:self.validBridgeResponseUrl.scheme];
-  self.api.pendingRequest = [FakeBridgeApiRequest requestWithURL:self.sampleUrl];
+  self.api.pendingRequest = [TestBridgeApiRequest requestWithURL:self.sampleUrl];
 
   BOOL result = [self.api _handleBridgeAPIResponseURL:self.validBridgeResponseUrl sourceApplication:@""];
 
@@ -612,7 +619,7 @@
   .andReturn(response);
 
   [self stubAppUrlSchemeWith:self.validBridgeResponseUrl.scheme];
-  self.api.pendingRequest = [FakeBridgeApiRequest requestWithURL:self.sampleUrl];
+  self.api.pendingRequest = [TestBridgeApiRequest requestWithURL:self.sampleUrl];
   self.api.pendingRequestCompletionBlock = ^(FBSDKBridgeAPIResponse *_response) {
     XCTAssertEqualObjects(_response, response, "Should invoke the completion with the expected bridge api response");
   };
@@ -641,7 +648,7 @@
   .andReturn(response);
 
   [self stubAppUrlSchemeWith:self.validBridgeResponseUrl.scheme];
-  self.api.pendingRequest = [FakeBridgeApiRequest requestWithURL:self.sampleUrl];
+  self.api.pendingRequest = [TestBridgeApiRequest requestWithURL:self.sampleUrl];
   self.api.pendingRequestCompletionBlock = ^(FBSDKBridgeAPIResponse *_response) {
     XCTAssertEqualObjects(_response, response, "Should invoke the completion with the expected bridge api response");
   };
@@ -660,7 +667,7 @@
   OCMStub(ClassMethod([self.bridgeApiResponseClassMock bridgeAPIResponseWithRequest:OCMArg.any error:OCMArg.any]));
 
   [self stubAppUrlSchemeWith:self.validBridgeResponseUrl.scheme];
-  self.api.pendingRequest = [FakeBridgeApiRequest requestWithURL:self.sampleUrl];
+  self.api.pendingRequest = [TestBridgeApiRequest requestWithURL:self.sampleUrl];
   self.api.pendingRequestCompletionBlock = ^(FBSDKBridgeAPIResponse *response) {
     XCTFail("Should not invoke pending completion handler");
   };

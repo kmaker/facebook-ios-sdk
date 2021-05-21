@@ -28,6 +28,7 @@
   #import "FBSDKCoreKit+Internal.h"
  #endif
 
+ #import "FBSDKCoreKitBasicsImportForLoginKit.h"
  #import "FBSDKLoginTooltipView.h"
  #import "FBSDKNonceUtility.h"
 
@@ -36,6 +37,8 @@ static const CGFloat kFBLogoLeftMargin = 6.0;
 static const CGFloat kButtonHeight = 28.0;
 static const CGFloat kRightMargin = 8.0;
 static const CGFloat kPaddingBetweenLogoTitle = 8.0;
+
+FBSDKAppEventName const FBSDKAppEventNameFBSDKLoginButtonDidTap = @"fb_login_button_did_tap";
 
 @implementation FBSDKLoginButton
 {
@@ -87,8 +90,9 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
     _nonce = [nonce copy];
   } else {
     _nonce = nil;
+    NSString *msg = [NSString stringWithFormat:@"Unable to set invalid nonce: %@ on FBSDKLoginButton", nonce];
     [FBSDKLogger singleShotLogEntry:FBSDKLoggingBehaviorDeveloperErrors
-                       formatString:@"Unable to set invalid nonce: %@ on FBSDKLoginButton", nonce];
+                           logEntry:msg];
   }
 }
 
@@ -162,7 +166,7 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
 
 - (void)configureButton
 {
-  _loginManager = [[FBSDKLoginManager alloc] init];
+  _loginManager = [FBSDKLoginManager new];
 
   NSString *logInTitle = [self _shortLogInTitle];
   NSString *logOutTitle = [self _logOutTitle];
@@ -317,10 +321,12 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
   if (self.nonce) {
     return [[FBSDKLoginConfiguration alloc] initWithPermissions:self.permissions
                                                        tracking:self.loginTracking
-                                                          nonce:self.nonce];
+                                                          nonce:self.nonce
+                                                messengerPageId:self.messengerPageId];
   } else {
     return [[FBSDKLoginConfiguration alloc] initWithPermissions:self.permissions
-                                                       tracking:self.loginTracking];
+                                                       tracking:self.loginTracking
+                                                messengerPageId:self.messengerPageId];
   }
 }
 
@@ -362,7 +368,7 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
   if (self._isAuthenticated || self.tooltipBehavior == FBSDKLoginButtonTooltipBehaviorDisable) {
     return;
   } else {
-    FBSDKLoginTooltipView *tooltipView = [[FBSDKLoginTooltipView alloc] init];
+    FBSDKLoginTooltipView *tooltipView = [FBSDKLoginTooltipView new];
     tooltipView.colorStyle = self.tooltipColorStyle;
     if (self.tooltipBehavior == FBSDKLoginButtonTooltipBehaviorForceDisplay) {
       tooltipView.forceDisplay = YES;
@@ -406,9 +412,9 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
                                                                  parameters:nil
                                                                       flags:FBSDKGraphRequestFlagDisableErrorRecovery];
   [request startWithCompletionHandler:^(FBSDKGraphRequestConnection *connection, id result, NSError *error) {
-    NSString *userID = [FBSDKTypeUtility stringValue:result[@"id"]];
+    NSString *userID = [FBSDKTypeUtility coercedToStringValue:result[@"id"]];
     if (!error && [FBSDKAccessToken.currentAccessToken.userID isEqualToString:userID]) {
-      self->_userName = [FBSDKTypeUtility stringValue:result[@"name"]];
+      self->_userName = [FBSDKTypeUtility coercedToStringValue:result[@"name"]];
       self->_userID = userID;
     }
   }];
@@ -437,6 +443,7 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
 // MARK: - Testability
 
  #if DEBUG
+  #if FBSDKTEST
 
 - (NSString *)userName
 {
@@ -448,6 +455,7 @@ static const CGFloat kPaddingBetweenLogoTitle = 8.0;
   return _userID;
 }
 
+  #endif
  #endif
 
 @end

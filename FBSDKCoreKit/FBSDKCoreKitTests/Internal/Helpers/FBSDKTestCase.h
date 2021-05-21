@@ -18,8 +18,8 @@
 
 #import <XCTest/XCTest.h>
 
-#import "FBSDKAccessToken.h"
 #import "FBSDKAppEvents.h"
+#import "FBSDKAppEventsConfiguration.h"
 #import "FBSDKAppEventsUtility.h"
 #import "FBSDKApplicationDelegate.h"
 #import "FBSDKGraphRequestConnection.h"
@@ -29,7 +29,7 @@
 #import "FBSDKServerConfiguration.h"
 #import "FBSDKServerConfigurationManager.h"
 
-@class FakeTokenCache;
+@class TestTokenCache;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -53,9 +53,6 @@ Also, to get a better understanding of mocking, please read the documentation at
 */
 @interface FBSDKTestCase : XCTestCase
 
-/// Used for sharing an `FBSDKAccessToken` class mock between tests
-@property (nullable, assign) id accessTokenClassMock;
-
 /// Used for sharing an `FBSDKAuthenticationToken` class mock between tests
 @property (nullable, assign) id authenticationTokenClassMock;
 
@@ -74,9 +71,6 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Used for sharing a `FBSDKAppEventsUtility` class  mock between tests
 @property (nullable, nonatomic, assign) id appEventsUtilityClassMock;
 
-/// Used for sharing an `FBSDKAppLinkResolverRequestBuilder` class mock between tests
-@property (nullable, assign) id appLinkResolverRequestBuilderMock;
-
 /// Used for sharing an `FBSDKApplicationDelegate` class mock between tests
 @property (nullable, assign) id fbApplicationDelegateClassMock;
 
@@ -89,12 +83,6 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Used for sharing an `FBSDKGraphRequest` class mock between tests
 @property (nullable, assign) id graphRequestMock;
 
-/// Used for sharing an `NSBundle` class mock between tests
-@property (nullable, assign) id nsBundleClassMock;
-
-/// Used for sharing an `NSUserDefaults` class mock between tests
-@property (nullable, assign) id nsUserDefaultsClassMock;
-
 /// Used for sharing an `FBSDKProfile` class mock between tests
 @property (nullable, assign) id profileClassMock;
 
@@ -106,9 +94,6 @@ Also, to get a better understanding of mocking, please read the documentation at
 
 /// Used for sharing an `SKAdNetwork` class mock between tests
 @property (nullable, nonatomic, assign) id skAdNetworkClassMock;
-
-/// Used for sharing an `NSNotificationCenter` class mock between tests
-@property (nullable, nonatomic, assign) id nsNotificationCenterClassMock;
 
 /// Used for sharing an `FBSDKMeasurementEventListener` class mock between tests
 @property (nullable, nonatomic, assign) id measurementEventListenerClassMock;
@@ -134,17 +119,11 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Used for sharing a `FBSDKCrashShield` class mock between tests
 @property (nullable, nonatomic, assign) id crashShieldClassMock;
 
-/// Used for sharing a `NSDate` class mock between tests
-@property (nullable, nonatomic, assign) id nsDateClassMock;
-
 /// Used for sharing a `UIApplication.sharedApplication` mock between tests
 @property (nullable, nonatomic, assign) id sharedApplicationMock;
 
 /// Used for sharing a `FBSDKLogger` class mock between tests
 @property (nullable, nonatomic, assign) id loggerClassMock;
-
-/// Used for sharing an `NSProcessInfo.processInfo` mock between tests
-@property (nullable, nonatomic, assign) id processInfoMock;
 
 /// Used for stubbing any instance that conforms to the `UIViewControllerTransitionCoordinator` protocol
 @property (nullable, nonatomic, assign) id transitionCoordinatorMock;
@@ -152,26 +131,23 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Used for sharing a `FBSDKBridgeAPIResponse` class mock between tests
 @property (nullable, nonatomic, assign) id bridgeApiResponseClassMock;
 
-/// Used for sharing a `FBSDKCrashObserver` class mock between tests
-@property (nullable, nonatomic, assign) id crashObserverClassMock;
+/// Used for sharing a `FBSDKAppEventsConfigurationManager` class mock between tests
+@property (nullable, nonatomic, assign) id appEventsConfigurationManagerClassMock;
 
-/// Used for sharing a `FBSDKErrorReport` class mock between tests
-@property (nullable, nonatomic, assign) id errorReportClassMock;
+/// Used for sharing a `FBSDKUtility` class mock between tests
+@property (nullable, nonatomic, assign) id utilityClassMock;
+
+/// Used for sharing a `ASIdentifier` class mock between tests
+@property (nullable, nonatomic, assign) id asIdentifierManagerClassMock;
 
 /// Stubs `FBSDKSettings.appID` and return the provided value
 - (void)stubAppID:(nullable NSString *)appID;
-
-/// Stubs `FBSDKSettings.isSDKInitialized` and return the provided value
-- (void)stubIsSDKInitialized:(BOOL)initialized;
 
 /// Stubs `FBSDKSettings.isAutoLogAppEventsEnabled` and return the provided value
 - (void)stubIsAutoLogAppEventsEnabled:(BOOL)isEnabled;
 
 /// Stubs `FBSDKGateKeeperManager.loadGateKeepers:` to avoid the side effect of a network fetch
 - (void)stubLoadingGateKeepers;
-
-/// Stubs `FBSDKFeatureManager.checkFeature:` for any feature requested by FeatureManager.
-- (void)stubCheckingFeatures;
 
 /// Stubs `FBSDKServerConfigurationManager.cachedServerConfiguration` and returns the default server configuration.
 /// Use this when you don't care what the actual configuration is and want to avoid a network call.
@@ -185,44 +161,11 @@ Also, to get a better understanding of mocking, please read the documentation at
 - (void)stubServerConfigurationFetchingWithConfiguration:(nullable FBSDKServerConfiguration *)configuration
                                                    error:(nullable NSError *)error;
 
-/// Stubs `NSBundle.mainBundle` with the provided NSBundle
-- (void)stubMainBundleWith:(NSBundle *)bundle;
-
-/// Stubs `NSUserDefaults.standardUserDefaults` with the provided NSUserDefaults
-- (void)stubUserDefaultsWith:(NSUserDefaults *)defaults;
-
-/// Stubs `FBSDKApplicationDelegate.initializeSDK` with a dictionary of launch options
-- (void)stubInitializeSDKWith:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions;
-
-/// Prevents logging on changes to Settings properties
-- (void)stubLoggingIfUserSettingsChanged;
-
-/// Stubs `FBSDKSettings.tokenCache`
-- (void)stubTokenCacheWith:(FakeTokenCache *)cache;
-
 /// Stubs `FBSDKProfile.fetchCachedProfile`
 - (void)stubCachedProfileWith:(FBSDKProfile *__nullable)profile;
 
-/// Stubs `FBSDKApplicationDelegate.sharedInstance`
-- (void)stubFBApplicationDelegateSharedInstanceWith:(FBSDKApplicationDelegate *)delegate;
-
-/// Stubs `SKAdNetwork.registerAppForAdNetworkAttribution`
-- (void)stubRegisterAppForAdNetworkAttribution;
-
-/// Stubs `NSNotificationCenter.defaultCenter` and returns the provided notification center
-- (void)stubDefaultNotificationCenterWith:(NSNotificationCenter *)notificationCenter;
-
-/// Stubs `MeasurementEventListener.defaultListener` and returns the provided listener.
-- (void)stubDefaultMeasurementEventListenerWith:(FBSDKMeasurementEventListener *)eventListener;
-
 /// Stubs `FBSDKSettings.graphAPIVersion` with the provided version string
 - (void)stubGraphAPIVersionWith:(NSString *)version;
-
-/// Stubs `FBSDKAccessToken.currentAccessToken` with the provided token
-- (void)stubCurrentAccessTokenWith:(nullable FBSDKAccessToken *)token;
-
-/// Stubs `FBSDKAuthenticationToken.currentAuthenticationToken` with the provided token
-- (void)stubCurrentAuthenticationTokenWith:(nullable FBSDKAuthenticationToken *)token;
 
 /// Stubs `FBSDKSettings.clientToken` with the provided token string
 - (void)stubClientTokenWith:(nullable NSString *)token;
@@ -239,7 +182,7 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Stubs `FBSDKSettings.shouldLimitEventAndDataUsage` with the provided value
 - (void)stubSettingsShouldLimitEventAndDataUsageWith:(BOOL)shouldLimit;
 
-/// Stubs `FBSDKAppEventsUtility.advertiserID` with the provided value
+/// Stubs `FBSDKAppEventsUtility.shared.advertiserID` with the provided value
 - (void)stubAppEventsUtilityAdvertiserIDWith:(nullable NSString *)identifier;
 
 /// Stubs `FBSDKAppEventsUtility.tokenStringToUseFor:` and returns the provided string
@@ -247,9 +190,6 @@ Also, to get a better understanding of mocking, please read the documentation at
 
 /// Stubs `FBSDKGraphRequest.startWithCompletionHandler:` and returns the provided result, error and connection
 - (void)stubGraphRequestWithResult:(id)result error:(nullable NSError *)error connection:(nullable FBSDKGraphRequestConnection *)connection;
-
-/// Stubs `FBSDKGraphRequest.startWithCompletionHandler:` and returns the provided result, error and connection
-- (void)stubAppLinkResolverRequestBuilderWithIdiomSpecificField:(nullable NSString *)field;
 
 /// Stubs `FBSDKGraphRequestPiggybackManager._lastRefreshTry` and returns the provided `NSDate`
 - (void)stubGraphRequestPiggybackManagerLastRefreshTryWith:(NSDate *)date;
@@ -261,17 +201,11 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// from hitting the network while proper mocks are being written.
 - (void)stubAllocatingGraphRequestConnection;
 
-/// Stubs `FBSDKFeatureManager.disableFeature:` for the provided feature
-- (void)stubDisableFeature:(NSString *)feature;
-
 /// Stubs `FBSDKSettings.isDataProcessingRestricted` and returns the provided value
 - (void)stubIsDataProcessingRestricted:(BOOL)isRestricted;
 
 /// Stubs `FBSDKSettings.facebookDomainPart` with the provided value
 - (void)stubFacebookDomainPartWith:(NSString *)domainPart;
-
-/// Stubs `UIApplication.sharedApplication`'s `canOpenURL:` method and returns the provided value
-- (void)stubCanOpenURLWith:(BOOL)canOpenURL;
 
 /// Stubs `UIApplication.sharedApplication`'s `openURL:` method and returns the provided value
 - (void)stubOpenURLWith:(BOOL)openURL;
@@ -287,17 +221,29 @@ Also, to get a better understanding of mocking, please read the documentation at
 /// Stubs `FBSDKSettings.appURLSchemeSuffix` and return the provided value
 - (void)stubAppUrlSchemeSuffixWith:(nullable NSString *)suffix;
 
-/// Resets cached properties in `FBSDKSettings`
-- (void)resetCachedSettings;
-
 /// Stubs `FBSDKSettings.userAgentSuffix` and returns the provided value
 - (void)stubUserAgentSuffixWith:(nullable NSString *)suffix;
 
-/// Stubs `NSProcessInfo`'s `isOperatingSystemVersionAtLeast:` and returns the provided value
-- (void)stubIsOperatingSystemVersionAtLeast:(NSOperatingSystemVersion)version with:(BOOL)returnValue;
-
 /// Stubs `FBSDKInternalUtility`'s `appURLScheme` property to return the provided scheme
 - (void)stubAppUrlSchemeWith:(nullable NSString *)scheme;
+
+/// Stubs `FBSDKAppEventsConfigurationManager`'s `loadAppEventsConfigurationWithBlock` method
+- (void)stubLoadingAppEventsConfiguration;
+
+/// Stubs `FBSDKAppEventsConfigurationManager.cachedAppEventsConfiguration` and returns the provided configuration
+- (void)stubCachedAppEventsConfigurationWithConfiguration:(FBSDKAppEventsConfiguration *)configuration;
+
+/// Stubs `FBSDKSettings.isAdvertiserTrackingEnabled` and returns the provided value
+- (void)stubIsAdvertiserTrackingEnabledWith:(BOOL)isAdvertiserTrackingEnabled;
+
+/// Stubs `ASIdentifierManager.sharedManager` and returns the provided identifier manager
+- (void)stubSharedAsIdentifierManagerWithAsIdentifierManager:(id)identifierManager;
+
+/// Stubs `ASIdentifierManager.advertisingIdentifier` and returns the provided value
+- (void)stubAdvertisingIdentifierWithIdentifier:(NSUUID *)uuid;
+
+/// Stubs `FBSDKSettings.isAdvertiserIDCollectionEnabled` and return the provided value
+- (void)stubIsAdvertiserIDCollectionEnabledWith:(BOOL)isAdvertiserIDCollectionEnabled;
 
 @end
 

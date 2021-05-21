@@ -21,13 +21,16 @@
 
 #import "FBSDKAppEventsUtility.h"
 #import "FBSDKCoreKit.h"
+#import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKSettings.h"
 #import "FBSDKSettings+Internal.h"
+#import "FBSDKSettingsProtocol.h"
 #import "FBSDKTestCase.h"
-#import "FakeBundle.h"
+#import "NSUserDefaults+FBSDKDataPersisting.h"
 #import "UserDefaultsSpy.h"
 
 @interface FBSDKSettings ()
++ (void)reset;
 + (NSString *)userAgentSuffix;
 + (void)setUserAgentSuffix:(NSString *)suffix;
 @end
@@ -43,28 +46,40 @@
 {
   id _mockAppEventsUtility;
   UserDefaultsSpy *userDefaultsSpy;
+  TestBundle *bundle;
+  TestEventLogger *logger;
 }
 
 static NSString *const emptyString = @"";
 static NSString *const whiteSpaceToken = @"   ";
 
++ (void)setUp
+{
+  [super setUp];
+
+  [FBSDKSettings reset];
+}
+
 - (void)setUp
 {
   [super setUp];
 
-  [self resetCachedSettings];
-
-  // Reset user defaults spy
   userDefaultsSpy = [UserDefaultsSpy new];
-  [self stubUserDefaultsWith:userDefaultsSpy];
-  [self stubLoggingIfUserSettingsChanged];
+  bundle = [TestBundle new];
+  logger = [TestEventLogger new];
+
+  [FBSDKSettings configureWithStore:userDefaultsSpy
+     appEventsConfigurationProvider:TestAppEventsConfigurationProvider.class
+             infoDictionaryProvider:bundle
+                        eventLogger:logger
+  ];
 }
 
 - (void)tearDown
 {
   [super tearDown];
 
-  [self resetCachedSettings];
+  [FBSDKSettings reset];
 }
 
 - (void)testDefaultGraphAPIVersion
@@ -80,9 +95,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingsBehaviorsFromMissingPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   NSSet<FBSDKLoggingBehavior> *expected = [NSSet setWithArray:@[FBSDKLoggingBehaviorDeveloperErrors]];
   XCTAssertEqualObjects(
     FBSDKSettings.loggingBehaviors,
@@ -93,9 +105,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingBehaviorsFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   NSSet<FBSDKLoggingBehavior> *expected = [NSSet setWithArray:@[FBSDKLoggingBehaviorDeveloperErrors]];
 
   XCTAssertEqualObjects(
@@ -107,8 +116,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingBehaviorsFromPlistWithInvalidEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookLoggingBehavior" : @[@"Foo"]}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookLoggingBehavior" : @[@"Foo"]}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   NSSet<FBSDKLoggingBehavior> *expected = [NSSet setWithArray:@[@"Foo"]];
   XCTAssertEqualObjects(
@@ -120,8 +129,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingBehaviorsFromPlistWithValidEntry
 {
-  NSBundle *bundle = [NSBundle bundleForClass:FBSDKTestCase.class];
-  [self stubMainBundleWith:bundle];
+  NSBundle *realBundle = [NSBundle bundleForClass:FBSDKTestCase.class];
+  FBSDKSettings.infoDictionaryProvider = realBundle;
 
   NSSet<FBSDKLoggingBehavior> *expected = [NSSet setWithArray:@[FBSDKLoggingBehaviorInformational]];
   XCTAssertEqualObjects(
@@ -133,9 +142,7 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testLoggingBehaviorsInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
+  bundle = (TestBundle *) FBSDKSettings.infoDictionaryProvider;
   FBSDKSettings.loggingBehaviors = [NSSet setWithArray:@[FBSDKLoggingBehaviorInformational]];
 
   XCTAssertNotNil(FBSDKSettings.loggingBehaviors, "sanity check");
@@ -153,9 +160,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingDomainPrefixFromMissingPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   XCTAssertNil(
     FBSDKSettings.facebookDomainPart,
     "There should be no default value for a facebook domain prefix"
@@ -164,8 +168,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingDomainPrefixFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDomainPart" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDomainPart" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.facebookDomainPart,
@@ -176,8 +180,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingFacebookDomainPrefixFromPlist
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDomainPart" : @"beta"}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDomainPart" : @"beta"}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.facebookDomainPart,
@@ -189,8 +193,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testSettingDomainPrefixWithPlistEntry
 {
   NSString *domainPrefix = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDomainPart" : domainPrefix}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDomainPart" : domainPrefix}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   [FBSDKSettings setFacebookDomainPart:@"foo"];
 
@@ -253,10 +257,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testDomainPartInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.facebookDomainPart = @"foo";
+
+  [self resetLoggingSideEffects];
 
   XCTAssertNotNil(FBSDKSettings.facebookDomainPart, "sanity check");
   XCTAssertNil(
@@ -274,8 +277,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testClientTokenFromPlist
 {
   NSString *clientToken = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookClientToken" : clientToken}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookClientToken" : clientToken}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.clientToken,
@@ -294,8 +297,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingClientTokenFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookClientToken" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookClientToken" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.clientToken,
@@ -307,8 +310,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testSettingClientTokenWithPlistEntry
 {
   NSString *clientToken = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookClientToken" : clientToken}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookClientToken" : clientToken}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   FBSDKSettings.clientToken = @"foo";
 
@@ -375,10 +378,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testClientTokenInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.clientToken = @"foo";
+
+  [self resetLoggingSideEffects];
 
   XCTAssertNotNil(FBSDKSettings.clientToken, "sanity check");
   XCTAssertNil(
@@ -396,8 +398,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testAppIdentifierFromPlist
 {
   NSString *appIdentifier = @"abc1234";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAppID" : appIdentifier}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAppID" : appIdentifier}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.appID,
@@ -416,8 +418,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingAppIdentifierFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAppID" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAppID" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.appID,
@@ -429,8 +431,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testSettingAppIdentifierWithPlistEntry
 {
   NSString *appIdentifier = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAppID" : appIdentifier}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAppID" : appIdentifier}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   FBSDKSettings.appID = @"foo";
 
@@ -492,10 +494,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testAppIdentifierInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.appID = @"foo";
+
+  [self resetLoggingSideEffects];
 
   XCTAssertNotNil(FBSDKSettings.appID, "sanity check");
   XCTAssertNil(
@@ -513,8 +514,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testDisplayNameFromPlist
 {
   NSString *displayName = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDisplayName" : displayName}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDisplayName" : displayName}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.displayName,
@@ -533,8 +534,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingDisplayNameFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDisplayName" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDisplayName" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.displayName,
@@ -546,8 +547,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testSettingDisplayNameWithPlistEntry
 {
   NSString *displayName = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookDisplayName" : displayName}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookDisplayName" : displayName}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   FBSDKSettings.displayName = @"foo";
 
@@ -609,10 +610,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testDisplayNameInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.displayName = @"foo";
+
+  [self resetLoggingSideEffects];
 
   XCTAssertNotNil(FBSDKSettings.displayName, "sanity check");
   XCTAssertNil(
@@ -630,8 +630,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testJPEGCompressionQualityFromPlist
 {
   NSNumber *jpegCompressionQuality = @0.1;
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookJpegCompressionQuality" : jpegCompressionQuality}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookJpegCompressionQuality" : jpegCompressionQuality}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualWithAccuracy(
     FBSDKSettings.JPEGCompressionQuality,
@@ -653,8 +653,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingJPEGCompressionQualityFromInvalidPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookJpegCompressionQuality" : @-2.0}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookJpegCompressionQuality" : @-2.0}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertNotEqual(
     FBSDKSettings.JPEGCompressionQuality,
@@ -665,8 +665,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingJPEGCompressionQualityWithPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookJpegCompressionQuality" : @0.2}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookJpegCompressionQuality" : @0.2}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   FBSDKSettings.JPEGCompressionQuality = 0.3;
 
@@ -729,10 +729,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testJPEGCompressionQualityInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.JPEGCompressionQuality = 1;
+
+  [self resetLoggingSideEffects];
 
   XCTAssertEqual(FBSDKSettings.JPEGCompressionQuality, 1, "Sanity check");
   XCTAssertNil(
@@ -750,8 +749,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testURLSchemeSuffixFromPlist
 {
   NSString *urlSchemeSuffix = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookUrlSchemeSuffix" : urlSchemeSuffix}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookUrlSchemeSuffix" : urlSchemeSuffix}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqual(
     FBSDKSettings.appURLSchemeSuffix,
@@ -770,8 +769,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testSettingURLSchemeSuffixFromEmptyPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookUrlSchemeSuffix" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookUrlSchemeSuffix" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.appURLSchemeSuffix,
@@ -783,8 +782,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testSettingURLSchemeSuffixWithPlistEntry
 {
   NSString *urlSchemeSuffix = @"abc123";
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookUrlSchemeSuffix" : urlSchemeSuffix}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookUrlSchemeSuffix" : urlSchemeSuffix}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   FBSDKSettings.appURLSchemeSuffix = @"foo";
 
@@ -846,10 +845,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testURLSchemeSuffixInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.appURLSchemeSuffix = @"foo";
+
+  [self resetLoggingSideEffects];
 
   XCTAssertNotNil(FBSDKSettings.appURLSchemeSuffix, "sanity check");
   XCTAssertNil(
@@ -866,8 +864,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testAutoLogAppEventsEnabledFromPlist
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isAutoLogAppEventsEnabled,
@@ -885,8 +883,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testAutoLogAppEventsEnabledInvalidPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAutoLogAppEventsEnabled" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAutoLogAppEventsEnabled" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isAutoLogAppEventsEnabled,
@@ -910,12 +908,10 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testOverridingCachedAutoLogAppEventsEnabled
 {
-  [self stubInitializeSDKWith:@{}];
-
   XCTAssertTrue(FBSDKSettings.isAutoLogAppEventsEnabled);
 
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertTrue(
     FBSDKSettings.isAutoLogAppEventsEnabled,
@@ -925,10 +921,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testAutoLogAppEventsEnabledInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.autoLogAppEventsEnabled = @YES;
+
+  [self resetLoggingSideEffects];
 
   XCTAssertTrue(FBSDKSettings.autoLogAppEventsEnabled, "sanity check");
   XCTAssertNil(
@@ -945,8 +940,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookAdvertiserIDCollectionEnabled
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isAdvertiserIDCollectionEnabled,
@@ -964,8 +959,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookAdvertiserIDCollectionEnabledInvalidPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isAdvertiserIDCollectionEnabled,
@@ -989,13 +984,11 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testOverridingCachedFacebookAdvertiserIDCollectionEnabled
 {
-  [self stubInitializeSDKWith:@{}];
-
   FBSDKSettings.advertiserIDCollectionEnabled = true;
   XCTAssertTrue(FBSDKSettings.isAdvertiserIDCollectionEnabled);
 
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAdvertiserIDCollectionEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertTrue(
     FBSDKSettings.isAdvertiserIDCollectionEnabled,
@@ -1005,10 +998,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testAdvertiserIDCollectionEnabledInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.advertiserIDCollectionEnabled = @YES;
+
+  [self resetLoggingSideEffects];
 
   XCTAssertTrue(FBSDKSettings.advertiserIDCollectionEnabled, "sanity check");
   XCTAssertNil(
@@ -1021,57 +1013,12 @@ static NSString *const whiteSpaceToken = @"   ";
   );
 }
 
-// MARK: Advertiser Tracking Status
-
-- (void)testFacebookAdvertiserTrackingStatusDefaultValue
-{
-  if (@available(iOS 14.0, *)) {
-    XCTAssertTrue(
-      [FBSDKSettings getAdvertisingTrackingStatus] == FBSDKAdvertisingTrackingUnspecified,
-      "Advertiser tracking status should default to Unspecified when there is no plist value given"
-    );
-  }
-}
-
-- (void)testSettingFacebookAdvertiserTrackingStatus
-{
-  if (@available(iOS 14.0, *)) {
-    XCTAssertTrue([FBSDKSettings setAdvertiserTrackingEnabled:YES]);
-    XCTAssertTrue(
-      [FBSDKSettings getAdvertisingTrackingStatus] == FBSDKAdvertisingTrackingAllowed,
-      "Should use the explicitly set property"
-    );
-  } else {
-    XCTAssertFalse([FBSDKSettings setAdvertiserTrackingEnabled:YES]);
-    XCTAssertNil(
-      userDefaultsSpy.capturedValues[@"FacebookAdvertiserTrackingStatus"],
-      "Should be no-op in iOS13 and below"
-    );
-  }
-}
-
-- (void)testAdvertiserTrackingStatusInternalStorage
-{
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
-  if (@available(iOS 14.0, *)) {
-    [FBSDKSettings setAdvertiserTrackingStatus:FBSDKAdvertisingTrackingUnspecified];
-
-    XCTAssertTrue([FBSDKSettings getAdvertisingTrackingStatus] == FBSDKAdvertisingTrackingUnspecified, "sanity check");
-    XCTAssertNil(
-      userDefaultsSpy.capturedObjectRetrievalKey,
-      "Should not attempt to access the cache to retrieve objects that have a current value"
-    );
-  }
-}
-
 // MARK: SKAdNetwork Report Enabled
 
 - (void)testFacebookSKAdNetworkReportEnabledFromPlist
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookSKAdNetworkReportEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookSKAdNetworkReportEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.SKAdNetworkReportEnabled,
@@ -1089,8 +1036,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookSKAdNetworkReportEnabledInvalidPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookSKAdNetworkReportEnabled" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookSKAdNetworkReportEnabled" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.SKAdNetworkReportEnabled,
@@ -1114,12 +1061,10 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testOverridingCachedFacebookSKAdNetworkReportEnabled
 {
-  [self stubInitializeSDKWith:@{}];
-
   XCTAssertTrue(FBSDKSettings.SKAdNetworkReportEnabled);
 
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookSKAdNetworkReportEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookSKAdNetworkReportEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertTrue(
     FBSDKSettings.SKAdNetworkReportEnabled,
@@ -1129,10 +1074,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookSKAdNetworkReportEnabledInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.SKAdNetworkReportEnabled = YES;
+
+  [self resetLoggingSideEffects];
 
   XCTAssertTrue(FBSDKSettings.SKAdNetworkReportEnabled, "sanity check");
   XCTAssertNil(
@@ -1149,8 +1093,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookCodelessDebugLogEnabled
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookCodelessDebugLogEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookCodelessDebugLogEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isCodelessDebugLogEnabled,
@@ -1160,8 +1104,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookCodelessDebugLogEnabledDefaultValue
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isCodelessDebugLogEnabled,
@@ -1171,8 +1115,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testFacebookCodelessDebugLogEnabledInvalidPlistEntry
 {
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookCodelessDebugLogEnabled" : emptyString}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookCodelessDebugLogEnabled" : emptyString}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isCodelessDebugLogEnabled,
@@ -1196,13 +1140,11 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testOverridingCachedFacebookCodelessDebugLogEnabled
 {
-  [self stubInitializeSDKWith:@{}];
-
   FBSDKSettings.codelessDebugLogEnabled = true;
   XCTAssertTrue(FBSDKSettings.isCodelessDebugLogEnabled);
 
-  NSBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookCodelessDebugLogEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookCodelessDebugLogEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertTrue(
     FBSDKSettings.isCodelessDebugLogEnabled,
@@ -1212,10 +1154,9 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testCachedFacebookCodelessDebugLogEnabledInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.codelessDebugLogEnabled = @YES;
+
+  [self resetLoggingSideEffects];
 
   XCTAssertTrue(FBSDKSettings.codelessDebugLogEnabled, "sanity check");
   XCTAssertNil(
@@ -1234,10 +1175,6 @@ static NSString *const whiteSpaceToken = @"   ";
 {
   // Using false because it is not the default value for `isAutoInitializationEnabled`
   userDefaultsSpy.capturedValues = @{ @"FacebookAutoLogAppEventsEnabled" : @NO };
-  [self stubUserDefaultsWith:userDefaultsSpy];
-
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
 
   XCTAssertFalse(
     FBSDKSettings.isAutoLogAppEventsEnabled,
@@ -1258,8 +1195,8 @@ static NSString *const whiteSpaceToken = @"   ";
 - (void)testInitialAccessForCachablePropertyWithEmptyCacheNonEmptyPlist
 {
   // Using false because it is not the default value for `isAutoInitializationEnabled`
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookAutoLogAppEventsEnabled" : @NO}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertFalse(
     FBSDKSettings.isAutoLogAppEventsEnabled,
@@ -1280,9 +1217,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testInitialAccessForCachablePropertyWithEmptyCacheEmptyPlistAndDefaultValue
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   XCTAssertTrue(
     FBSDKSettings.isAutoLogAppEventsEnabled,
     "Should use the default value for a property when there are no values in the cache or plist"
@@ -1302,9 +1236,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testInitialAccessForNonCachablePropertyWithEmptyPlist
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   XCTAssertNil(
     FBSDKSettings.clientToken,
     "A non-cachable property with no default value and no plist entry should not have a value"
@@ -1323,8 +1254,8 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testInitialAccessForNonCachablePropertyWithNonEmptyPlist
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{@"FacebookClientToken" : @"abc123"}];
-  [self stubMainBundleWith:bundle];
+  bundle = [[TestBundle alloc] initWithInfoDictionary:@{@"FacebookClientToken" : @"abc123"}];
+  FBSDKSettings.infoDictionaryProvider = bundle;
 
   XCTAssertEqualObjects(
     FBSDKSettings.clientToken,
@@ -1361,6 +1292,36 @@ static NSString *const whiteSpaceToken = @"   ";
   XCTAssertFalse(
     FBSDKSettings.shouldLimitEventAndDataUsage,
     "Should limit event data usage by default"
+  );
+}
+
+- (void)testSetUseCachedValuesForExpensiveMetadata
+{
+  FBSDKSettings.shouldUseCachedValuesForExpensiveMetadata = YES;
+
+  XCTAssertEqualObjects(
+    userDefaultsSpy.capturedValues[@"com.facebook.sdk:FBSDKSettingsUseCachedValuesForExpensiveMetadata"],
+    @YES,
+    "Should store whether or not to limit event and data usage in the user defaults"
+  );
+  XCTAssertTrue(
+    FBSDKSettings.shouldUseCachedValuesForExpensiveMetadata,
+    "should use cached values for expensive metadata"
+  );
+}
+
+- (void)testSetUseTokenOptimizations
+{
+  FBSDKSettings.sharedSettings.shouldUseTokenOptimizations = NO;
+
+  XCTAssertEqualObjects(
+    userDefaultsSpy.capturedValues[@"com.facebook.sdk.FBSDKSettingsUseTokenOptimizations"],
+    @NO,
+    "Should store whether or not to use token optimizations"
+  );
+  XCTAssertFalse(
+    FBSDKSettings.sharedSettings.shouldUseTokenOptimizations,
+    "Should use token optimizations"
   );
 }
 
@@ -1467,9 +1428,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testDataProcessingOptionsWithEmptyCache
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   XCTAssertNil(
     FBSDKSettings.dataProcessingOptions,
     "Should not be able to get data processing options if there is none cached"
@@ -1487,13 +1445,14 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testDataProcessingOptionsWithNonEmptyCache
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.dataProcessingOptions = @[];
 
   // Reset internal storage
-  [self resetCachedSettings];
+  [FBSDKSettings reset];
+  [FBSDKSettings configureWithStore:userDefaultsSpy
+     appEventsConfigurationProvider:TestAppEventsConfigurationProvider.class
+             infoDictionaryProvider:[TestBundle new]
+                        eventLogger:[TestEventLogger new]];
 
   XCTAssertNotNil(
     FBSDKSettings.dataProcessingOptions,
@@ -1512,9 +1471,6 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testDataProcessingOptionsInternalStorage
 {
-  FakeBundle *bundle = [FakeBundle bundleWithDictionary:@{}];
-  [self stubMainBundleWith:bundle];
-
   FBSDKSettings.dataProcessingOptions = @[];
 
   XCTAssertNotNil(FBSDKSettings.dataProcessingOptions, "sanity check");
@@ -1558,17 +1514,15 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testIsEventDelayTimerExpired
 {
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
   [FBSDKSettings recordInstall];
   XCTAssertFalse([FBSDKSettings isEventDelayTimerExpired]);
 
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
   NSDate *today = [NSDate new];
   NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
   NSDateComponents *addComponents = [NSDateComponents new];
   addComponents.month = -1;
   NSDate *expiredDate = [calendar dateByAddingComponents:addComponents toDate:today options:0];
-  [[NSUserDefaults standardUserDefaults] setObject:expiredDate forKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
+  [userDefaultsSpy setObject:expiredDate forKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
   XCTAssertTrue([FBSDKSettings isEventDelayTimerExpired]);
 
   [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
@@ -1576,25 +1530,17 @@ static NSString *const whiteSpaceToken = @"   ";
 
 - (void)testIsSetATETimeExceedsInstallTime
 {
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsSetAdvertiserTrackingEnabledTimestamp"];
   [FBSDKSettings recordInstall];
   [FBSDKSettings recordSetAdvertiserTrackingEnabled];
   XCTAssertFalse([FBSDKSettings isSetATETimeExceedsInstallTime]);
-
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsSetAdvertiserTrackingEnabledTimestamp"];
   [FBSDKSettings recordSetAdvertiserTrackingEnabled];
   NSDate *today = [NSDate new];
   NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
   NSDateComponents *addComponents = [NSDateComponents new];
   addComponents.month = -1;
   NSDate *expiredDate = [calendar dateByAddingComponents:addComponents toDate:today options:0];
-  [[NSUserDefaults standardUserDefaults] setObject:expiredDate forKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
+  [userDefaultsSpy setObject:expiredDate forKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
   XCTAssertTrue([FBSDKSettings isSetATETimeExceedsInstallTime]);
-
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsInstallTimestamp"];
-  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"com.facebook.sdk:FBSDKSettingsSetAdvertiserTrackingEnabledTimestamp"];
 }
 
 - (void)testLoggingBehaviors
@@ -1679,6 +1625,20 @@ static NSString *const whiteSpaceToken = @"   ";
   XCTAssertTrue([FBSDKSettings isDataProcessingRestricted]);
   [FBSDKSettings setDataProcessingOptions:nil];
   XCTAssertFalse([FBSDKSettings isDataProcessingRestricted]);
+}
+
+/**
+ Setting the plist-based properties will call `logIfSDKSettingsChanged` which will
+ access properties some properties, check for plist and cache values and set defaults
+ for them.
+ Clearing the test fixtures enables us to only observe the side effects from
+ getting the property and not those from setting the property in a test or resetting
+ the property as part of test lifecycle management.
+ */
+- (void)resetLoggingSideEffects
+{
+  bundle = [TestBundle new];
+  userDefaultsSpy = [UserDefaultsSpy new];
 }
 
 @end

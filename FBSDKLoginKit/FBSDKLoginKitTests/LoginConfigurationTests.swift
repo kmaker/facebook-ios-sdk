@@ -16,6 +16,10 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+#if BUCK
+import FacebookCore
+#endif
+
 import XCTest
 
 class LoginConfigurationTests: XCTestCase {
@@ -38,6 +42,10 @@ class LoginConfigurationTests: XCTestCase {
     XCTAssertNotNil(
       config.nonce,
       "A config should be created with a default nonce"
+    )
+    XCTAssertNil(
+      config.messengerPageId,
+      "Messenger Page Id should default to nil when unspecified"
     )
   }
 
@@ -78,32 +86,19 @@ class LoginConfigurationTests: XCTestCase {
     let config = LoginConfiguration(permissions: permissions)
 
     XCTAssertEqual(
-      Set((config?.requestedPermissions.map { $0.value })!),
+      Set((config?.requestedPermissions.map { $0.value })!), // swiftlint:disable:this force_unwrapping
       Set(permissions.map { $0.name }),
       "Should create a configuration with the provided tracking preference"
     )
   }
 
-  func testCreatingWithPermissionsForLimitedTracking() {
-    let allowedPermissions = Set([Permission.email])
-    let disallowedPermissions = Set([Permission.userBirthday, .userPosts])
-
-    var configuration = LoginConfiguration(
-      permissions: disallowedPermissions,
-      tracking: .limited
-    )
-    XCTAssertNil(
-      configuration,
-      "Should not create a configuration with permissions that are disallowed based on the tracking preference" // swiftlint:disable:this line_length
-    )
-
-    configuration = LoginConfiguration(
-      permissions: allowedPermissions,
-      tracking: .limited
-    )
-    XCTAssertNotNil(
-      configuration,
-      "Should create a configuration with permissions that are allowed based on the tracking preference" // swiftlint:disable:this line_length
+  func testCreatingWithMessengerPageId() {
+    let messengerPageId = "12345"
+    let config = LoginConfiguration(messengerPageId: messengerPageId)
+    XCTAssertEqual(
+      config?.messengerPageId,
+      messengerPageId,
+      "Should create a configuration with the provided Messenger Page Id"
     )
   }
 }

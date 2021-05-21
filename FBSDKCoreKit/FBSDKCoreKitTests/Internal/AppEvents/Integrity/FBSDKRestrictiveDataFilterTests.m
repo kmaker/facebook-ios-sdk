@@ -16,11 +16,11 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#import <OCMock/OCMock.h>
 #import <XCTest/XCTest.h>
 
 #import "FBSDKAppEvents.h"
 #import "FBSDKAppEventsState.h"
+#import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKInternalUtility.h"
 #import "FBSDKRestrictiveDataFilterManager.h"
 #import "FBSDKServerConfiguration.h"
@@ -28,13 +28,15 @@
 #import "FBSDKServerConfigurationManager.h"
 #import "FBSDKTestCase.h"
 
+@interface FBSDKGraphRequestConnection (RestrictiveDataFilterTesting)
+
++ (void)resetCanMakeRequests;
+
+@end
+
 typedef void (^FBSDKSKAdNetworkReporterBlock)(void);
 @interface FBSDKSKAdNetworkReporter (Testing)
 + (void)_loadConfigurationWithBlock:(FBSDKSKAdNetworkReporterBlock)block;
-@end
-
-@interface FBSDKAppEvents (Testing)
-@property (nonatomic, assign) BOOL disableTimer;
 @end
 
 @interface FBSDKRestrictiveDataFilterManager ()
@@ -44,15 +46,13 @@ typedef void (^FBSDKSKAdNetworkReporterBlock)(void);
 
 @end
 
-@interface FBSDKRestrictiveDataFilterTests : FBSDKTestCase
+@interface FBSDKRestrictiveDataFilterTests : XCTestCase
 @end
 
 @implementation FBSDKRestrictiveDataFilterTests
 
 - (void)setUp
 {
-  self.shouldAppEventsMockBePartial = YES;
-
   [super setUp];
 
   NSMutableDictionary<NSString *, id> *params = [NSMutableDictionary dictionaryWithDictionary:@{
@@ -68,43 +68,31 @@ typedef void (^FBSDKSKAdNetworkReporterBlock)(void);
                                                      }
                                                    }
                                                  }];
+  [FBSDKRestrictiveDataFilterManager configureWithServerConfigurationProvider:TestServerConfigurationProvider.class];
 
   FBSDKServerConfiguration *config = [FBSDKServerConfigurationFixtures configWithDictionary:@{ @"restrictiveParams" : params }];
-  [self stubCachedServerConfigurationWithServerConfiguration:config];
-  [self stubServerConfigurationFetchingWithConfiguration:config
-                                                   error:nil];
-  [self stubAllocatingGraphRequestConnection];
-  [self stubLoadingAdNetworkReporterConfiguration];
 
-  [self.appEventsMock setDisableTimer:YES];
-
+  [TestServerConfigurationProvider setStubbedServerConfiguration:config];
   [FBSDKRestrictiveDataFilterManager enable];
 }
 
 - (void)testFilterByParams
 {
-  NSString *testEventName = @"restrictive_event_name";
-  OCMStub([self.appEventsUtilityClassMock shouldDropAppEvent]).andReturn(NO);
+  NSString *eventName = @"restrictive_event_name";
+  NSDictionary *parameters = @{@"dob" : @"06-29-2019"};
+  NSDictionary *expected = @{@"_restrictedParams" : @"{\"dob\":\"4\"}"};
 
-  // filtered by param key
-  [[self.appEventStatesMock expect] addEvent:[OCMArg checkWithBlock:^(id value) {
-    XCTAssertEqualObjects(value[@"_eventName"], testEventName);
-    XCTAssertNil(value[@"dob"]);
-    XCTAssertEqualObjects(value[@"_restrictedParams"], @"{\"dob\":\"4\"}");
-    return YES;
-  }] isImplicit:NO];
-  [FBSDKAppEvents logEvent:testEventName parameters:@{@"dob" : @"06-29-2019"}];
-  [self.appEventStatesMock verify];
+  XCTAssertEqualObjects(
+    [FBSDKRestrictiveDataFilterManager processParameters:parameters eventName:eventName],
+    expected
+  );
 
-  // should not be filtered
-  [[self.appEventStatesMock expect] addEvent:[OCMArg checkWithBlock:^(id value) {
-    XCTAssertEqualObjects(value[@"_eventName"], testEventName);
-    XCTAssertEqualObjects(value[@"test_key"], @66666);
-    XCTAssertNil(value[@"_restrictedParams"]);
-    return YES;
-  }] isImplicit:NO];
-  [FBSDKAppEvents logEvent:testEventName parameters:@{@"test_key" : @66666}];
-  [self.appEventStatesMock verify];
+  parameters = @{@"test_key" : @66666};
+
+  XCTAssertEqualObjects(
+    [FBSDKRestrictiveDataFilterManager processParameters:parameters eventName:eventName],
+    parameters
+  );
 }
 
 - (void)testGetMatchedDataTypeByParam

@@ -21,6 +21,7 @@
 
 #import <FBSDKCoreKit/FBSDKCoreKit.h>
 
+#import "FBSDKAuthenticationToken+Internal.h"
 #import "FBSDKCoreKit+Internal.h"
 #import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKTestCase.h"
@@ -30,8 +31,6 @@
 
 - (instancetype)initWithTokenString:(NSString *)tokenString
                               nonce:(NSString *)nonce
-                             claims:(nullable FBSDKAuthenticationTokenClaims *)claims
-                                jti:(NSString *)jti
                         graphDomain:(NSString *)graphDomain;
 
 @end
@@ -43,22 +42,13 @@
 @implementation FBSDKAuthenticationTokenTests
 {
   FBSDKAuthenticationToken *_token;
-  NotificationCenterSpy *_notificationCenterSpy;
-}
-
-- (void)setUp
-{
-  [super setUp];
-
-  _notificationCenterSpy = [NotificationCenterSpy new];
-  [self stubDefaultNotificationCenterWith:_notificationCenterSpy];
 }
 
 // MARK: - Persistence
 
 - (void)testRetrievingCurrentToken
 {
-  FakeTokenCache *cache = [[FakeTokenCache alloc] initWithAccessToken:nil authenticationToken:nil];
+  TestTokenCache *cache = [[TestTokenCache alloc] initWithAccessToken:nil authenticationToken:nil];
   _token = SampleAuthenticationToken.validToken;
   id partialTokenMock = OCMPartialMock(_token);
   OCMStub([partialTokenMock tokenCache]).andReturn(cache);
@@ -78,14 +68,11 @@
 {
   NSString *expectedTokenString = @"expectedTokenString";
   NSString *expectedNonce = @"expectedNonce";
-  NSString *expectedJTI = @"expectedJTI";
   NSString *expectedGraphDomain = @"expectedGraphDomain";
 
   FBSDKTestCoder *coder = [FBSDKTestCoder new];
   _token = [[FBSDKAuthenticationToken alloc] initWithTokenString:expectedTokenString
                                                            nonce:expectedNonce
-                                                          claims:nil
-                                                             jti:expectedJTI
                                                      graphDomain:expectedGraphDomain];
   [_token encodeWithCoder:coder];
 
@@ -98,11 +85,6 @@
     coder.encodedObject[@"FBSDKAuthenticationTokenNonceCodingKey"],
     expectedNonce,
     @"Should encode the expected nonce string"
-  );
-  XCTAssertEqualObjects(
-    coder.encodedObject[@"FBSDKAuthenticationTokenJtiCodingKey"],
-    expectedJTI,
-    @"Should encode the expected JTI"
   );
   XCTAssertEqualObjects(
     coder.encodedObject[@"FBSDKAuthenticationTokenGraphDomainCodingKey"],
@@ -127,15 +109,24 @@
     @"Initializing from a decoder should attempt to decode a String for the nonce key"
   );
   XCTAssertEqualObjects(
-    coder.decodedObject[@"FBSDKAuthenticationTokenJtiCodingKey"],
-    [NSString class],
-    @"Initializing from a decoder should attempt to decode a String for the jti key"
-  );
-  XCTAssertEqualObjects(
     coder.decodedObject[@"FBSDKAuthenticationTokenGraphDomainCodingKey"],
     [NSString class],
     @"Initializing from a decoder should attempt to decode a String for the graph domain key"
   );
+}
+
+- (void)testTokenCacheIsNilByDefault
+{
+  [FBSDKAuthenticationToken resetTokenCache];
+  XCTAssertNil(FBSDKAuthenticationToken.tokenCache, @"Authentication token cache should be nil by default");
+}
+
+- (void)testTokenCacheCanBeSet
+{
+  TestTokenCache *cache = [[TestTokenCache alloc] initWithAccessToken:nil
+                                                  authenticationToken:nil];
+  FBSDKAuthenticationToken.tokenCache = cache;
+  XCTAssertEqualObjects(FBSDKAuthenticationToken.tokenCache, cache, @"Authentication token cache should be settable");
 }
 
 @end

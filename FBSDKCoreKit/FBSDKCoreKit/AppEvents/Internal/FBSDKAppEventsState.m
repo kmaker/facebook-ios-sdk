@@ -18,8 +18,8 @@
 
 #import "FBSDKAppEventsState.h"
 
+#import "FBSDKCoreKitBasicsImport.h"
 #import "FBSDKEventDeactivationManager.h"
-#import "FBSDKInternalUtility.h"
 #import "FBSDKRestrictiveDataFilterManager.h"
 
 #define FBSDK_APPEVENTSTATE_ISIMPLICIT_KEY @"isImplicit"
@@ -69,7 +69,9 @@
 {
   NSString *appID = [decoder decodeObjectOfClass:[NSString class] forKey:FBSDK_APPEVENTSSTATE_APPID_KEY];
   NSString *tokenString = [decoder decodeObjectOfClass:[NSString class] forKey:FBSDK_APPEVENTSSTATE_TOKENSTRING_KEY];
-  NSArray *events = [decoder decodeObjectOfClass:[NSArray class] forKey:FBSDK_APPEVENTSSTATE_EVENTS_KEY];
+  NSArray *events = [FBSDKTypeUtility arrayValue:[decoder decodeObjectOfClasses:
+                                                  [NSSet setWithArray:@[NSArray.class, NSDictionary.class]]
+                                                                         forKey:FBSDK_APPEVENTSSTATE_EVENTS_KEY]];
   NSUInteger numSkipped = [[decoder decodeObjectOfClass:[NSNumber class] forKey:FBSDK_APPEVENTSSTATE_NUMSKIPPED_KEY] unsignedIntegerValue];
 
   if ((self = [self initWithToken:tokenString appID:appID])) {
@@ -165,14 +167,15 @@
     && [self.appID isEqualToString:appID]);
 }
 
-- (NSString *)JSONStringForEvents:(BOOL)includeImplicitEvents
+- (NSString *)JSONStringForEventsIncludingImplicitEvents:(BOOL)includeImplicitEvents
 {
-  [FBSDKEventDeactivationManager processEvents:_mutableEvents];
+  [FBSDKEventDeactivationManager.shared processEvents:_mutableEvents];
   [FBSDKRestrictiveDataFilterManager processEvents:_mutableEvents];
 
   NSMutableArray *events = [[NSMutableArray alloc] initWithCapacity:_mutableEvents.count];
   for (NSDictionary *eventAndImplicitFlag in _mutableEvents) {
-    if (!includeImplicitEvents && [eventAndImplicitFlag[FBSDK_APPEVENTSTATE_ISIMPLICIT_KEY] boolValue]) {
+    const BOOL isImplicitEvent = [eventAndImplicitFlag[FBSDK_APPEVENTSTATE_ISIMPLICIT_KEY] boolValue];
+    if (!includeImplicitEvents && isImplicitEvent) {
       continue;
     }
     NSMutableDictionary *event = eventAndImplicitFlag[@"event"];

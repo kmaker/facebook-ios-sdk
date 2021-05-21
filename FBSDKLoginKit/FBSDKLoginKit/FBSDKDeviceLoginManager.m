@@ -27,7 +27,9 @@
  #import "FBSDKCoreKit+Internal.h"
 #endif
 
+#import "FBSDKCoreKitBasicsImportForLoginKit.h"
 #import "FBSDKDeviceLoginCodeInfo+Internal.h"
+#import "FBSDKDeviceRequestsHelper.h"
 #import "FBSDKLoginConstants.h"
 
 static NSMutableArray<FBSDKDeviceLoginManager *> *g_loginManagerInstances;

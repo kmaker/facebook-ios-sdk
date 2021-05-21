@@ -17,33 +17,24 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import FBSDKCoreKit
+import TestTools
 import XCTest
+
+// swiftlint:disable type_body_length
 
 class LoginButtonTests: XCTestCase {
 
   let validNonce: String = "abc123"
-  var button: FBLoginButton! // swiftlint:disable:this force_unwrapping
-  var sampleProfile: Profile {
-    return Profile(
-      userID: "Sample ID",
-      firstName: nil,
-      middleName: nil,
-      lastName: nil,
-      name: "Sample Name",
-      linkURL: nil,
-      refreshDate: nil
-    )
-  }
-
+  var button: FBLoginButton! // swiftlint:disable:this implicitly_unwrapped_optional
   var sampleToken: AuthenticationToken {
-    return AuthenticationToken(tokenString: "abc", nonce: "123", claims: nil, jti: "jti")
+    return AuthenticationToken(tokenString: "abc", nonce: "123")
   }
 
   override func setUp() {
     super.setUp()
 
     AccessToken.setCurrent(nil, shouldDispatchNotif: false)
-    AuthenticationToken.setCurrent(nil, shouldPostNotification: false)
+    AuthenticationToken.setCurrent(nil)
     Profile.current = nil
 
     button = FBLoginButton()
@@ -93,7 +84,7 @@ class LoginButtonTests: XCTestCase {
   func testInitialContentUpdateWithInactiveAccessTokenWithProfile() {
     let button = TestButton()
     AccessToken.setCurrent(nil, shouldDispatchNotif: false)
-    Profile.setCurrent(sampleProfile, shouldPostNotification: false)
+    Profile.setCurrent(SampleUserProfiles.valid, shouldPostNotification: false)
 
     button._initializeContent()
 
@@ -111,7 +102,7 @@ class LoginButtonTests: XCTestCase {
 
   func testInitialContentUpdateWithActiveAccessTokenWithProfile() {
     let button = TestButton()
-    AccessToken.setCurrent(SampleAccessToken.validToken, shouldDispatchNotif: false)
+    AccessToken.setCurrent(SampleAccessTokens.validToken, shouldDispatchNotif: false)
     let profile = Profile(
       userID: "Sample ID",
       firstName: nil,
@@ -140,7 +131,7 @@ class LoginButtonTests: XCTestCase {
   func testInitialContentUpdateWithoutAccessTokenWithoutProfile() {
     let button = TestButton()
     AccessToken.setCurrent(nil, shouldDispatchNotif: false)
-    Profile.setCurrent(nil, shouldPostNotification: false);
+    Profile.setCurrent(nil, shouldPostNotification: false)
 
     button._initializeContent()
 
@@ -163,7 +154,7 @@ class LoginButtonTests: XCTestCase {
   // MARK: - Determining Authentication Status
 
   func testDeterminingAuthenticationWithAccessTokenWithoutAuthToken() {
-    AccessToken.setCurrent(SampleAccessToken.validToken, shouldDispatchNotif: false)
+    AccessToken.setCurrent(SampleAccessTokens.validToken, shouldDispatchNotif: false)
 
     XCTAssertTrue(
       button._isAuthenticated(),
@@ -172,7 +163,7 @@ class LoginButtonTests: XCTestCase {
   }
 
   func testDeterminingAuthenticationWithoutAccessTokenWithAuthToken() {
-    AuthenticationToken.setCurrent(sampleToken, shouldPostNotification: false)
+    AuthenticationToken.setCurrent(sampleToken)
 
     XCTAssertTrue(
       button._isAuthenticated(),
@@ -264,20 +255,20 @@ class LoginButtonTests: XCTestCase {
   }
 
   func testUpdatingContentWithProfile() {
-    button._updateContent(forUserProfile: sampleProfile)
+    button._updateContent(forUserProfile: SampleUserProfiles.valid)
 
     XCTAssertTrue(
       button.isSelected,
       "Should be selected if there is a valid profile"
     )
-    XCTAssertEqual(button.userName(), sampleProfile.name)
-    XCTAssertEqual(button.userID(), sampleProfile.userID)
+    XCTAssertEqual(button.userName(), SampleUserProfiles.valid.name)
+    XCTAssertEqual(button.userID(), SampleUserProfiles.valid.userID)
   }
 
   func testUpdatingContentForProfileWithNewId() {
     let button = TestButton()
-    let profile = sampleProfile(userID: name)
-    button._updateContent(forUserProfile: sampleProfile)
+    let profile = SampleUserProfiles.createValid(name: name)
+    button._updateContent(forUserProfile: SampleUserProfiles.valid)
     button._updateContent(forUserProfile: profile)
 
     XCTAssertEqual(
@@ -294,8 +285,8 @@ class LoginButtonTests: XCTestCase {
 
   func testUpdatingContentForProfileWithNewName() {
     let button = TestButton()
-    let profile = sampleProfile(name: name)
-    button._updateContent(forUserProfile: sampleProfile)
+    let profile = SampleUserProfiles.createValid(name: name)
+    button._updateContent(forUserProfile: SampleUserProfiles.valid)
     button._updateContent(forUserProfile: profile)
 
     XCTAssertEqual(
@@ -312,7 +303,7 @@ class LoginButtonTests: XCTestCase {
 
   func testUpdatingContentWithValidAccessToken() {
     let button = TestButton()
-    AccessToken.setCurrent(SampleAccessToken.validToken, shouldDispatchNotif: false)
+    AccessToken.setCurrent(SampleAccessTokens.validToken, shouldDispatchNotif: false)
 
     button._updateContentForAccessToken()
 
@@ -325,7 +316,7 @@ class LoginButtonTests: XCTestCase {
 
   func testUpdatingContentWithInvalidAccessToken() {
     let button = TestButton()
-    AccessToken.setCurrent(SampleAccessToken.expiredToken, shouldDispatchNotif: false)
+    AccessToken.setCurrent(SampleAccessTokens.expiredToken, shouldDispatchNotif: false)
 
     button._updateContentForAccessToken()
     button._updateContentForAccessToken()
@@ -343,10 +334,10 @@ class LoginButtonTests: XCTestCase {
     // Make sure the username and id properties on button are set to the same values
     // as the access token. This is an easy way to do with without having to stub
     // a network call
-    let profile = sampleProfile(userID: SampleAccessToken.validToken.userID)
+    let profile = SampleUserProfiles.createValid(userID: SampleAccessTokens.validToken.userID)
     button._updateContent(forUserProfile: profile)
 
-    AccessToken.setCurrent(SampleAccessToken.validToken, shouldDispatchNotif: false)
+    AccessToken.setCurrent(SampleAccessTokens.validToken, shouldDispatchNotif: false)
 
     button._updateContentForAccessToken()
 
@@ -357,19 +348,29 @@ class LoginButtonTests: XCTestCase {
     )
   }
 
-  private func sampleProfile(
-    userID: String = "Sample ID",
-    name: String = "Sample Name"
-  ) -> Profile {
-    return Profile(
-          userID: userID,
-          firstName: nil,
-          middleName: nil,
-          lastName: nil,
-          name: name,
-          linkURL: nil,
-          refreshDate: nil
-        )
+  // MARK: - Setting Messenger Page ID
+
+  func testDefaultMessengerPageId() {
+    XCTAssertNil(FBLoginButton().messengerPageId, "Should not have a default Messenger Page ID")
+  }
+
+  func testSettingMessengerPageId() {
+    button.messengerPageId = "1234"
+
+    XCTAssertEqual(
+      button.messengerPageId,
+      "1234",
+      "Should set a valid Messenger Page ID"
+    )
+  }
+
+  func testLoginConfigurationWithMessengerPageId() {
+    button.messengerPageId = "1234"
+
+    XCTAssertNotNil(
+      button.loginConfiguration(),
+      "Should be able to create a configuration with Messenger Page Id"
+    )
   }
 }
 

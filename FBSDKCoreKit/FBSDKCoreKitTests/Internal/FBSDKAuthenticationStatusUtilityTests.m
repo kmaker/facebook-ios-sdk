@@ -18,16 +18,9 @@
 
 #import <XCTest/XCTest.h>
 
-#import "FBSDKAuthenticationToken+Internal.h"
+@import TestTools;
 #import "FBSDKCoreKitTests-Swift.h"
 #import "FBSDKTestCase.h"
-
-@interface FBSDKAuthenticationToken (Testing)
-
-+ (void)setCurrentAuthenticationToken:(FBSDKAuthenticationToken *)token
-               shouldPostNotification:(BOOL)shouldPostNotification;
-
-@end
 
 @interface FBSDKProfile (Testing)
 
@@ -52,16 +45,16 @@
 - (void)setUp
 {
   [super setUp];
-  [FBSDKAuthenticationToken setCurrentAuthenticationToken:SampleAuthenticationToken.validToken shouldPostNotification:NO];
-  [FBSDKAccessToken setCurrentAccessToken:SampleAccessToken.validToken shouldDispatchNotif:NO];
-  [FBSDKProfile setCurrentProfile:SampleUserProfile.valid shouldPostNotification:NO];
+  [FBSDKAuthenticationToken setCurrentAuthenticationToken:SampleAuthenticationToken.validToken];
+  [FBSDKAccessToken setCurrentAccessToken:SampleAccessTokens.validToken shouldDispatchNotif:NO];
+  [FBSDKProfile setCurrentProfile:SampleUserProfiles.valid shouldPostNotification:NO];
 }
 
 // MARK: checkAuthenticationStatus
 
 - (void)testCheckAuthenticationStatusWithNoToken
 {
-  [FBSDKAuthenticationToken setCurrentAuthenticationToken:nil shouldPostNotification:NO];
+  [FBSDKAuthenticationToken setCurrentAuthenticationToken:nil];
 
   [FBSDKAuthenticationStatusUtility checkAuthenticationStatus];
 

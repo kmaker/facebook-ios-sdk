@@ -7,9 +7,143 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## Unreleased
 
+### Added
+
+- Added ability to add `messenger_page_id` param to `FBSDKLoginButton` and `FBSDKLoginConfiguration`
+- Added `FBSDKApplicationObserving` - a protocol for describing types that can optional respond to lifecycle events propagated by `ApplicationDelegate`
+- Added `addObserver:` and `removeObserver:` to `FBSDKApplicationDelegate`
+
+### Removed
+
+- `AppLinkReturnToRefererControllerDelegate`
+- `AppLinkReturnToRefererController`
+- `FBSDKIncludeStatusBarInSize`
+- `AppLinkReturnToRefererViewDelegate`
+- `FBAppLinkReturnToRefererView`
+- `FBSDKApplicationDelegate.initializeSDK:launchOptions:`. The replacement method is `FBSDKApplicationDelegate.application:didFinishLaunchingWithOptions:`
+- `FBSDKErrorRecoveryAttempting`'s `attemptRecoveryFromError:optionIndex:delegate:didRecoverSelector:contextInfo:`
+- `FBSDKProfile`'s `initWithUserID:firstName:middleName:lastName:name:linkURL:refreshDate:imageURL:email:`
+- `FBSDKProfile`'s `initWithUserID:firstName:middleName:lastName:name:linkURL:refreshDate:imageURL:email:friendIDs:birthday:ageRange:isLimited:`
+- `FBSDKProfile`'s `initWithUserID:firstName:middleName:lastName:name:linkURL:refreshDate:imageURL:email:friendIDs:`
+- `FBSDKProfile`'s `initWithUserID:firstName:middleName:lastName:name:linkURL:refreshDate:imageURL:email:friendIDs:birthday:ageRange:`
+- `FBSDKAccessTokensBlock`
+- `FBSDKTestUsersManager`
+- `FBSDKGraphErrorRecoveryProcessor`'s `delegate` property
+- `FBSDKGraphErrorRecoveryProcessor`'s `didPresentErrorWithRecovery:contextInfo:`
+- `FBSDKGamingVideoUploader`'s `uploadVideoWithConfiguration:andCompletionHandler:`
+- `FBSDKGamingImageUploader`'s `uploadImageWithConfiguration:andCompletionHandler:`
+
+[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.3.0...HEAD)
+
+## 9.3.0
+
 ### Important
 
-[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.0.0...HEAD)
+**Performance Improvements**
+
+- Cocoapods: FBSDKCoreKit rebuilds FacebookSDKStrings.bundle so xcode processes the strings files into binary plist format. This strips comments and saves ~181KB in disk space for apps. [#1713](https://github.com/facebook/facebook-ios-sdk/pull/1713)
+
+### Added
+
+- Added AEM (Aggregated Events Measurement) support under public beta.
+- Added `external_id` support in advanced matching.
+- `GamingServicesKit` changed the Game Request feature flow where if the user has the facebook app installed, they will not see a webview to complete a game request. Instead they will switch to the facebook app and app switch back once the request is sent or the user cancels the dialog.
+
+### Fixed
+
+- Fix for shadowing swift type. [#1721](https://github.com/facebook/facebook-ios-sdk/pull/1721)
+- Optimization for cached token fetching. See the [commit message](https://github.com/facebook/facebook-ios-sdk/commit/13fabd2f9ea2036b533f86e9443e201951e4e707) for more details.
+- Cocoapods with generate_multiple_pod_projects [#1709](https://github.com/facebook/facebook-ios-sdk/pull/1709)
+
+[2021-04-25](https://github.com/facebook/facebook-ios-sdk/releases/tag/v9.3.0) |
+[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.2.0...v9.3.0)
+
+## 9.2.0
+
+### Added
+
+- Added Limited Login support for `user_friends`, `user_birthday` and `user_age_range` permissions under public beta.
+- Shared Profile instance will be populated with `birthday` and `ageRange` fields using the claims from the `AuthenticationToken`. (NOTE: birthday and ageRange fields are in public beta mode)
+- Added a convenience initializer to `Profile` as part of fixing a bug where upgrading from limited to regular login would fail to fetch the profile using the newly available access token.
+- `GamingServicesKit` added an observer class where if developers set the delegate we will trigger the delegate method with a `GamingPayload` object if any urls contain gaming payload data. (NOTE: This feature is currently under development)
+
+### Fixed
+
+**Performance Improvements**
+
+- Added in memory cache for carrier and timezone so they are not dynamically loaded on every `didBecomeActive`
+- Added cached `ASIdentifierManager` to avoid dynamic loading on every `didBecomeActive`
+- Backgrounds the expensive property creation that happens during AppEvents class initialization.
+- Added thread safety for incrementing the serial number used by the logging utility.
+- Added early return to Access Token to avoid unnecessary writes to keychain which can cause performance issues.
+
+**Bug Fixes**
+
+- Fixed using CocoaPods with the `generate_multiple_pod_projects` flag. [#1707](https://github.com/facebook/facebook-ios-sdk/issues/1707)
+- Adhere to flush behavior for logging completion. Will now only flush events if the flush behavior is `explicitOnly`.
+- Static library binaries are built with `BITCODE_GENERATION_MODE = bitcode` to fix errors where Xcode is unable to build apps with bitcode enabled. [#1698](https://github.com/facebook/facebook-ios-sdk/pull/1698)
+
+### Deprecated
+
+- `TestUsersManager`. The APIs that back this convenience type still exist but there is no compelling reason to have this be part of the core SDK. See the [commit message](https://github.com/facebook/facebook-ios-sdk/commit/441f7fcefadd36218b81fbca0a5d406ceb86a2da) for more on the rationale.
+
+### Removed
+
+- Internal type `AudioResourceLoader`.
+
+[2021-04-06](https://github.com/facebook/facebook-ios-sdk/releases/tag/v9.2.0) |
+[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.1.0...v9.2.0)
+
+## 9.1.0
+
+### Added
+
+- `friendIDs` property added to `FBSDKProfile` (NOTE: We are building out the `friendIDs` property in Limited Login with the intention to roll it out in early spring)
+- `FBSDKProfile` initializer that includes optional `friendIDs` argument
+- `claims` property of type `FBSDKAuthenticationTokenClaims` added to `FBSDKAuthenticationToken`
+
+### Fixed
+
+- Build Warnings for SPM with Xcode 12.5 Beta 2 [#1661](https://github.com/facebook/facebook-ios-sdk/pull/1661)
+- Memory leak in `FBSDKGraphErrorRecoveryProcessor`
+- Name conflict for Swift version of `FBSDKURLSessionTask`
+- Avoids call to `AppEvents` singleton when setting overriding app ID [#1647](https://github.com/facebook/facebook-ios-sdk/pull/1647)
+- CocoaPods now compiles `FBSDKDynamicFrameworkLoader` with ARC.
+- CocoaPods now uses static frameworks as the prebuilt libraries for the aggregate FacebookSDK podspec
+- App Events use the correct token if none have been provided manually ([@ptxmac](https://github.com/ptxmac)[#1670](https://github.com/facebook/facebook-ios-sdk/pull/1670)
+
+### Deprecated
+
+- `FBSDKGraphErrorRecoveryProcessor`'s `delegate` property
+- `FBSDKGraphErrorRecoveryProcessor`'s `didPresentErrorWithRecovery:contextInfo:` method
+- `FBSDKAppLinkReturnToRefererView`
+- `FBSDKAppLinkReturnToRefererController`
+
+### Removed
+
+- Internal type `FBSDKErrorRecoveryAttempter`
+
+[2021-02-25](https://github.com/facebook/facebook-ios-sdk/releases/tag/v9.1.0) |
+[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.0.1...v9.1.0)
+
+## 9.0.1
+
+### Added
+
+- Add control support for the key FacebookSKAdNetworkReportEnabled in the info.plist
+- Add APIs to control SKAdNetwork Report
+
+### Fixed
+
+- Fix deadlock issue between SKAdNetwork Report and AAM/Codeless
+- Fix default ATE sync for the first app launch
+- Fix build error caused by LoginButton nonce property ([@kmcbride](https://github.com/kmcbride) in [#1616](https://github.com/facebook/facebook-ios-sdk/pull/1616))
+- Fix crash on FBSDKWebViewAppLinkResolverWebViewDelegate ([@Kry256](https://github.com/Kry256) in [#1624](https://github.com/facebook/facebook-ios-sdk/pull/1624))
+- Fix XCFrameworks build issue (#1628)
+- Fix deadlock when AppEvents ActivateApp is called without initializing the SDK (#1636)
+
+[2021-02-02](https://github.com/facebook/facebook-ios-sdk/releases/tag/v9.0.1) |
+[Full Changelog](https://github.com/facebook/facebook-ios-sdk/compare/v9.0.0...v9.0.1)
 
 ## 9.0.0
 

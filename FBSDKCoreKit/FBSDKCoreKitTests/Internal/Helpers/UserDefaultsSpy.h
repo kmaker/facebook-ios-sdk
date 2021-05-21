@@ -22,8 +22,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface UserDefaultsSpy : NSUserDefaults
 
-@property (nonatomic, copy) NSString *capturedObjectRetrievalKey;
+@property (nullable, nonatomic, copy) NSString *capturedObjectRetrievalKey;
+@property (nullable, nonatomic, copy) NSString *capturedSetObjectKey;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *capturedValues;
+@property (nonatomic, strong) NSString *(^stringForKeyCallback)(NSString *);
 
 @end
 

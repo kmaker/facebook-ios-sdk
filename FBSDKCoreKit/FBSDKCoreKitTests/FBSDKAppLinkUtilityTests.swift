@@ -19,6 +19,42 @@
 import FBSDKCoreKit
 
 class FBSDKAppLinkUtilityTests: FBSDKTestCase {
+
+  let requestFactory = TestGraphRequestFactory()
+  var bundle = TestBundle()
+
+  override func setUp() {
+    super.setUp()
+
+    TestAppEventsConfigurationProvider.stubbedConfiguration = SampleAppEventsConfigurations.valid
+    AppLinkUtility.configure(
+      requestProvider: requestFactory,
+      infoDictionaryProvider: bundle
+    )
+  }
+
+  override class func tearDown() {
+    super.tearDown()
+
+    // This can be removed once AppLinkUtility injects a manager.
+    AppEventsConfigurationManager.reset()
+    TestAppEventsConfigurationProvider.reset()
+  }
+
+  func testConfiguringWithRequestProvider() {
+    XCTAssertTrue(
+      AppLinkUtility.requestProvider is TestGraphRequestFactory,
+      "Should use the provided request provider type"
+    )
+  }
+
+  func testConfiguringWithInfoDictionary() {
+    XCTAssertTrue(
+      AppLinkUtility.infoDictionaryProvider is TestBundle,
+      "Should use the provided info dictionary provider type"
+    )
+  }
+
   func testWithNoPromoCode() {
     let url = URL(string: "myapp://somelink/?someparam=somevalue")! // swiftlint:disable:this force_unwrapping
     let promoCode = AppLinkUtility.appInvitePromotionCode(from: url)
@@ -40,11 +76,27 @@ class FBSDKAppLinkUtilityTests: FBSDKTestCase {
         ]
       ]
     ]
+    bundle = TestBundle(infoDictionary: bundleDict)
 
-    let fakeBundle = FakeBundle(dictionary: bundleDict)
-    stubMainBundle(with: fakeBundle)
+    AppLinkUtility.configure(
+      requestProvider: requestFactory,
+      infoDictionaryProvider: bundle
+    )
 
     XCTAssertTrue(AppLinkUtility.isMatchURLScheme("fb123"))
     XCTAssertFalse(AppLinkUtility.isMatchURLScheme("not_in_url_schemes"))
+  }
+
+  func testRequestProviderAfterGraphRequest() {
+    AppEventsConfigurationManager.configure(
+      store: UserDefaultsSpy(),
+      settings: TestSettings(),
+      graphRequestFactory: TestGraphRequestFactory(),
+      graphRequestConnectionFactory: TestGraphRequestConnectionFactory()
+    )
+
+    AppLinkUtility.fetchDeferredAppLink()
+    XCTAssertEqual(requestFactory.capturedGraphPath, "(null)/activities")
+    XCTAssertEqual(requestFactory.capturedHttpMethod, HTTPMethod(rawValue: "POST"))
   }
 }
